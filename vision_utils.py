@@ -176,7 +176,13 @@ def choose_template(
     # Absolute-pixel check first: covers 1024×768 whether windowed on a large
     # monitor or fullscreen on a native 1024×768 display.
     category = "full"
-    if fh6_w and fh6_h and fh6_w <= SMALL_ABS_WIDTH and fh6_h <= SMALL_ABS_HEIGHT and os.path.isfile(small_tpl):
+    if (
+        fh6_w
+        and fh6_h
+        and fh6_w <= SMALL_ABS_WIDTH
+        and fh6_h <= SMALL_ABS_HEIGHT
+        and os.path.isfile(small_tpl)
+    ):
         category = "small"
     elif w and h:
         w_percent = w / screen_w

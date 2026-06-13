@@ -77,9 +77,9 @@ def analyse(screen_bgr, label, template_paths, confidence, scale_min, scale_max,
     screen_gray = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2GRAY)
     annotated = screen_bgr.copy()
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {label}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     overall_found = False
 
@@ -195,7 +195,7 @@ def main():
         annotated, "FAIL templates", fail_templates, conf, scale_min, SCALE_MAX, SCALE_STEPS
     )
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     if found_succ:
         verdict = "✅ WOULD REPORT: Buy successful"
     elif found_fail:
@@ -203,7 +203,7 @@ def main():
     else:
         verdict = "⚠️  WOULD REPORT: Undetermined (neither template matched)"
     print(f"  VERDICT: {verdict}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     # Save the raw capture and the annotated version
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")

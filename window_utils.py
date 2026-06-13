@@ -370,7 +370,13 @@ def save_badge_params(params: dict, win_w: int, win_h: int, dpr: float = 1.0) ->
         # Migrate legacy flat format to multi-profile
         old_ref = existing.get("window_ref_physical", {"width": win_w, "height": win_h})
         old_label = f"{old_ref.get('width', win_w)}x{old_ref.get('height', win_h)}"
-        profiles = [{"label": old_label, "window_ref_physical": old_ref, **{k: v for k, v in existing.items() if k != "window_ref_physical"}}]
+        profiles = [
+            {
+                "label": old_label,
+                "window_ref_physical": old_ref,
+                **{k: v for k, v in existing.items() if k != "window_ref_physical"},
+            }
+        ]
     else:
         profiles = []
 

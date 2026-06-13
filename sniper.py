@@ -351,9 +351,7 @@ def _detect_buy_result(raw, full_region=None):
         succ_score = _score(_variants(base_succ))
         fail_score = _score(_variants(base_fail))
 
-        print(
-            f"Buy detection: success={succ_score:.3f}  fail={fail_score:.3f}  threshold={conf}"
-        )
+        print(f"Buy detection: success={succ_score:.3f}  fail={fail_score:.3f}  threshold={conf}")
         logger.update_log(
             f"  Buy scores → success={succ_score:.3f}  fail={fail_score:.3f}  threshold={conf}"
         )
@@ -515,7 +513,9 @@ def sniper_loop(
             logger_callback("⚠️  FH6 window not found, using configured region for scans")
 
         # Load sold-badge detection data, picking the best profile for this window size
-        badge_params = load_badge_params(window.width if window else None, window.height if window else None)
+        badge_params = load_badge_params(
+            window.width if window else None, window.height if window else None
+        )
         # Prefer the template selected during auto-calibration (pre-chosen for this
         # window size); fall back to the full-size template when not calibrated.
         sold_template = calibrator.load_sold_badge_template() or window_utils.resource_path(
@@ -585,7 +585,9 @@ def sniper_loop(
                             except Exception:
                                 pass
 
-                        result = buy_sequence(timings, full_region=full_region, stop_event=stop_event)
+                        result = buy_sequence(
+                            timings, full_region=full_region, stop_event=stop_event
+                        )
                         if result is True:
                             successes += 1
                             logger_callback(f"Attempt #{buy_attempts} ✅ Buy successful")

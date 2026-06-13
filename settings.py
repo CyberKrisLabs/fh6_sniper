@@ -45,7 +45,11 @@ def validate_settings(timings_dict, scans_value, buyout_target=None):
         (is_valid, error_message, corrected_values_dict)
     """
     errors = []
-    corrected = {"timings": timings_dict.copy(), "scans": scans_value, "buyout_target": buyout_target}
+    corrected = {
+        "timings": timings_dict.copy(),
+        "scans": scans_value,
+        "buyout_target": buyout_target,
+    }
 
     # Validate scans
     if scans_value < MIN_SCANS:

@@ -99,8 +99,10 @@ def _grab_bgr() -> np.ndarray | None:
     """Single full-screen capture — tries dxcam first, falls back to pyautogui."""
     try:
         import dxcam
+
         cam = dxcam.create(output_color="BGR")
         import time
+
         for _ in range(8):
             frame = cam.grab()
             if frame is not None:
@@ -111,6 +113,7 @@ def _grab_bgr() -> np.ndarray | None:
         pass
     try:
         import pyautogui
+
         img = pyautogui.screenshot()
         return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
     except Exception:
@@ -185,11 +188,11 @@ class BuyOverlay(QWidget):
 
         self._show_succ = True
         self._show_fail = True
-        self._succ_loc: tuple[int, int, int, int] | None = None   # logical px
+        self._succ_loc: tuple[int, int, int, int] | None = None  # logical px
         self._fail_loc: tuple[int, int, int, int] | None = None
         self._succ_score = 0.0
         self._fail_score = 0.0
-        self._region: tuple[int, int, int, int] | None = None     # logical px
+        self._region: tuple[int, int, int, int] | None = None  # logical px
         self._threshold = 0.72
         self.show()
 
@@ -279,8 +282,10 @@ class ControlPanel(QWidget):
         if saved:
             sx, sy, sw, sh = saved
             self._region: tuple[int, int, int, int] | None = (
-                int(sx / self._dpr), int(sy / self._dpr),
-                int(sw / self._dpr), int(sh / self._dpr),
+                int(sx / self._dpr),
+                int(sy / self._dpr),
+                int(sw / self._dpr),
+                int(sh / self._dpr),
             )
         else:
             self._region = None
@@ -381,22 +386,34 @@ class ControlPanel(QWidget):
         region_layout.addWidget(self._region_label)
         self._update_region_label()
 
-        region_layout.addWidget(self._nudge_group(
-            "X", [("◀◀ 20", -20), ("◀ 5", -5), ("5 ▶", 5), ("20 ▶▶", 20)],
-            lambda d: self._adj_region(dx=d),
-        ))
-        region_layout.addWidget(self._nudge_group(
-            "Y", [("▲▲ 20", -20), ("▲ 5", -5), ("5 ▼", 5), ("20 ▼▼", 20)],
-            lambda d: self._adj_region(dy=d),
-        ))
-        region_layout.addWidget(self._nudge_group(
-            "Width", [("◀◀ 20", -20), ("◀ 5", -5), ("5 ▶", 5), ("20 ▶▶", 20)],
-            lambda d: self._adj_region(dw=d),
-        ))
-        region_layout.addWidget(self._nudge_group(
-            "Height", [("▲▲ 20", -20), ("▲ 5", -5), ("5 ▼", 5), ("20 ▼▼", 20)],
-            lambda d: self._adj_region(dh=d),
-        ))
+        region_layout.addWidget(
+            self._nudge_group(
+                "X",
+                [("◀◀ 20", -20), ("◀ 5", -5), ("5 ▶", 5), ("20 ▶▶", 20)],
+                lambda d: self._adj_region(dx=d),
+            )
+        )
+        region_layout.addWidget(
+            self._nudge_group(
+                "Y",
+                [("▲▲ 20", -20), ("▲ 5", -5), ("5 ▼", 5), ("20 ▼▼", 20)],
+                lambda d: self._adj_region(dy=d),
+            )
+        )
+        region_layout.addWidget(
+            self._nudge_group(
+                "Width",
+                [("◀◀ 20", -20), ("◀ 5", -5), ("5 ▶", 5), ("20 ▶▶", 20)],
+                lambda d: self._adj_region(dw=d),
+            )
+        )
+        region_layout.addWidget(
+            self._nudge_group(
+                "Height",
+                [("▲▲ 20", -20), ("▲ 5", -5), ("5 ▼", 5), ("20 ▼▼", 20)],
+                lambda d: self._adj_region(dh=d),
+            )
+        )
 
         region_btn_row = QHBoxLayout()
         reset_btn = QPushButton("Use full window")
@@ -455,8 +472,10 @@ class ControlPanel(QWidget):
                 self._status_label.setText("⚠ FH6 window not found")
                 return
             self._region = (
-                int(win.left / self._dpr), int(win.top / self._dpr),
-                int(win.width / self._dpr), int(win.height / self._dpr),
+                int(win.left / self._dpr),
+                int(win.top / self._dpr),
+                int(win.width / self._dpr),
+                int(win.height / self._dpr),
             )
         x, y, w, h = self._region
         self._region = (x + dx, y + dy, max(50, w + dw), max(50, h + dh))
@@ -544,35 +563,47 @@ class ControlPanel(QWidget):
                 rw_p = max(1, min(rw_p, fw - rx_p))
                 rh_p = max(1, min(rh_p, fh - ry_p))
 
-                crop = frame[ry_p:ry_p + rh_p, rx_p:rx_p + rw_p]
+                crop = frame[ry_p : ry_p + rh_p, rx_p : rx_p + rw_p]
                 crop_gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
 
-                succ_score, succ_loc_crop, succ_tpl = _best_match(crop_gray, _asset_variants(SUCC_BASE))
-                fail_score, fail_loc_crop, fail_tpl = _best_match(crop_gray, _asset_variants(FAIL_BASE))
+                succ_score, succ_loc_crop, succ_tpl = _best_match(
+                    crop_gray, _asset_variants(SUCC_BASE)
+                )
+                fail_score, fail_loc_crop, fail_tpl = _best_match(
+                    crop_gray, _asset_variants(FAIL_BASE)
+                )
 
                 def _to_log(loc_crop):
                     if loc_crop is None:
                         return None
                     cx, cy, cw, ch = loc_crop
                     return (
-                        int((rx_p + cx) / dpr), int((ry_p + cy) / dpr),
-                        int(cw / dpr), int(ch / dpr),
+                        int((rx_p + cx) / dpr),
+                        int((ry_p + cy) / dpr),
+                        int(cw / dpr),
+                        int(ch / dpr),
                     )
 
-                result.update({
-                    "frame": frame,
-                    "succ_score": succ_score,
-                    "succ_tpl": succ_tpl,
-                    "fail_score": fail_score,
-                    "fail_tpl": fail_tpl,
-                    "succ_loc_log": _to_log(succ_loc_crop),
-                    "fail_loc_log": _to_log(fail_loc_crop),
-                    "region_log": (
-                        int(rx_p / dpr), int(ry_p / dpr),
-                        int(rw_p / dpr), int(rh_p / dpr),
-                    ) if region is not None else None,
-                    "threshold": threshold,
-                })
+                result.update(
+                    {
+                        "frame": frame,
+                        "succ_score": succ_score,
+                        "succ_tpl": succ_tpl,
+                        "fail_score": fail_score,
+                        "fail_tpl": fail_tpl,
+                        "succ_loc_log": _to_log(succ_loc_crop),
+                        "fail_loc_log": _to_log(fail_loc_crop),
+                        "region_log": (
+                            int(rx_p / dpr),
+                            int(ry_p / dpr),
+                            int(rw_p / dpr),
+                            int(rh_p / dpr),
+                        )
+                        if region is not None
+                        else None,
+                        "threshold": threshold,
+                    }
+                )
             except Exception as e:
                 result["error"] = str(e)
             self._done.emit(result)
@@ -653,8 +684,16 @@ class ControlPanel(QWidget):
             c = color_bgr if found else tuple(v // 2 for v in color_bgr)
             cv2.rectangle(annotated, (px, py), (px + pw, py + ph), c, 3 if found else 1)
             tag = f"{label} {score:.3f}" + (" MATCH" if found else "")
-            cv2.putText(annotated, tag, (px, max(py - 6, 10)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, c, 2, cv2.LINE_AA)
+            cv2.putText(
+                annotated,
+                tag,
+                (px, max(py - 6, 10)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                c,
+                2,
+                cv2.LINE_AA,
+            )
 
         _draw(self._last_succ_loc_log, self._last_succ_score, (60, 220, 60), "SUCCESS")
         _draw(self._last_fail_loc_log, self._last_fail_score, (60, 60, 220), "FAIL")

@@ -688,13 +688,15 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
         ),
     }
 
-    window_utils.save_badge_params(result_dict, win.width, win.height, window_utils._get_display_dpr())
+    window_utils.save_badge_params(
+        result_dict, win.width, win.height, window_utils._get_display_dpr()
+    )
 
     row_num = best_info["row_idx"] + 1
     _status(
         f"✅ Badge calibration: score={best_score:.3f} detected in row {row_num}  "
-        f"x={result_dict['badge_x_pct']*100:.1f}%  y={result_dict['badge_y_pct']*100:.1f}%  "
-        f"w={result_dict['badge_w_pct']*100:.1f}%  h={result_dict['badge_h_pct']*100:.1f}%"
+        f"x={result_dict['badge_x_pct'] * 100:.1f}%  y={result_dict['badge_y_pct'] * 100:.1f}%  "
+        f"w={result_dict['badge_w_pct'] * 100:.1f}%  h={result_dict['badge_h_pct'] * 100:.1f}%"
     )
     return result_dict
 

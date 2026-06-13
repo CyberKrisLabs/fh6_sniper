@@ -220,6 +220,7 @@ class _AuctionRegionOverlay(QWidget):
         MARGIN = 8
         _label_text = "Auction Options button should be inside the red box  (9s)"
         from PySide6.QtGui import QFontMetrics
+
         _fm = QFontMetrics(QApplication.font())
         _text_min_w = _fm.horizontalAdvance(_label_text) + MARGIN * 4
         ow = max(lw + MARGIN * 2, _text_min_w)
@@ -442,26 +443,24 @@ class _IngameOverlay(QWidget):
         self._manual_auction_btn = QPushButton("Calib Auction")
         self._manual_auction_btn.setFixedWidth(108)
         self._manual_auction_btn.setProperty("class", "accent-btn")
-        self._manual_auction_btn.clicked.connect(
-            self._sniper_tab.run_manual_auction_from_overlay
-        )
+        self._manual_auction_btn.clicked.connect(self._sniper_tab.run_manual_auction_from_overlay)
         self._manual_auction_btn.pressed.connect(self._on_overlay_interact)
         top_row.addWidget(self._manual_auction_btn)
 
         self._manual_badge_btn = QPushButton("Calib Badge")
         self._manual_badge_btn.setFixedWidth(100)
         self._manual_badge_btn.setProperty("class", "accent-btn")
-        self._manual_badge_btn.clicked.connect(
-            self._sniper_tab.run_manual_badge_from_overlay
-        )
+        self._manual_badge_btn.clicked.connect(self._sniper_tab.run_manual_badge_from_overlay)
         self._manual_badge_btn.pressed.connect(self._on_overlay_interact)
         top_row.addWidget(self._manual_badge_btn)
 
         self._hide_btn = QPushButton("Hide")
         self._hide_btn.setFixedWidth(90)
+
         def _on_hide():
             self._user_closed = True
             self.close()
+
         self._hide_btn.clicked.connect(_on_hide)
         self._hide_btn.pressed.connect(self._on_overlay_interact)
         top_row.addWidget(self._hide_btn)
@@ -511,9 +510,7 @@ class _IngameOverlay(QWidget):
 
     def _on_calib_img(self, path: str) -> None:
         if path and os.path.isfile(path):
-            pix = QPixmap(path).scaledToHeight(
-                34, Qt.TransformationMode.SmoothTransformation
-            )
+            pix = QPixmap(path).scaledToHeight(34, Qt.TransformationMode.SmoothTransformation)
             self._calib_img_label.setPixmap(pix)
             self._calib_img_label.setVisible(True)
         else:
@@ -843,7 +840,7 @@ class SniperTab(QWidget):
                         tokens = msg.split()
                         new = []
                         for t in tokens:
-                            if ("/" in t or "\\\\" in t or t.startswith("assets/")):
+                            if "/" in t or "\\\\" in t or t.startswith("assets/"):
                                 try:
                                     bn = os.path.basename(t)
                                     new.append(bn if bn else t)
@@ -912,9 +909,7 @@ class SniperTab(QWidget):
             region = None
             try:
                 builtins.print = capture_print
-                region = calibrator.calibrate(
-                    status_label=cal_overlay, error_label=cal_overlay
-                )
+                region = calibrator.calibrate(status_label=cal_overlay, error_label=cal_overlay)
             except Exception:
                 _emit_log(f"❌ Auction calibration error:\n{traceback.format_exc()}")
             finally:
@@ -1204,9 +1199,7 @@ def _save_badge_from_clicks(badge_x: int, badge_y: int, badge_w: int, badge_h: i
         if not row_regions:
             return False
         badge_cy = badge_y + badge_h // 2
-        rx, ry, rw, rh = min(
-            row_regions, key=lambda r: abs((r[1] + r[3] // 2) - badge_cy)
-        )
+        rx, ry, rw, rh = min(row_regions, key=lambda r: abs((r[1] + r[3] // 2) - badge_cy))
         params = {
             "badge_x_pct": (badge_x - rx) / rw,
             "badge_y_pct": (badge_y - ry) / rh,
@@ -1235,7 +1228,7 @@ def _save_badge_from_clicks(badge_x: int, badge_y: int, badge_w: int, badge_h: i
 class CalibrationTab(QWidget):
     _status_changed = Signal(str, bool)
     _auction_done = Signal(object, str)  # (region_list_or_None, result_text)
-    _badge_done = Signal(str)            # result_text
+    _badge_done = Signal(str)  # result_text
 
     def __init__(self, sniper_tab: SniperTab, parent=None):
         super().__init__(parent)
@@ -1471,7 +1464,7 @@ class CalibrationTab(QWidget):
                     tokens = msg.split()
                     new = []
                     for t in tokens:
-                        if ("/" in t or "\\\\" in t or t.startswith("assets/")):
+                        if "/" in t or "\\\\" in t or t.startswith("assets/"):
                             try:
                                 bn = os.path.basename(t)
                                 new.append(bn if bn else t)
@@ -1564,7 +1557,7 @@ class CalibrationTab(QWidget):
                     tokens = msg.split()
                     new = []
                     for t in tokens:
-                        if ("/" in t or "\\\\" in t or t.startswith("assets/")):
+                        if "/" in t or "\\\\" in t or t.startswith("assets/"):
                             try:
                                 bn = os.path.basename(t)
                                 new.append(bn if bn else t)
@@ -1680,9 +1673,7 @@ class CalibrationTab(QWidget):
             _emit_log(f"📌 Top-left: {pt1.x}, {pt1.y}")
 
             for i in range(5, 0, -1):
-                overlay.config(
-                    text=f"Move mouse to BOTTOM-RIGHT corner of sold badge ({i})"
-                )
+                overlay.config(text=f"Move mouse to BOTTOM-RIGHT corner of sold badge ({i})")
                 time.sleep(1)
             pt2 = pyautogui.position()
             _emit_log(f"📌 Bottom-right: {pt2.x}, {pt2.y}")
@@ -1765,9 +1756,7 @@ class CalibrationTab(QWidget):
                 scores = []
                 for rx, ry, rw, rh in row_rects:
                     row_img = (
-                        full_img.crop((rx, ry, rx + rw, ry + rh))
-                        if full_img is not None
-                        else None
+                        full_img.crop((rx, ry, rx + rw, ry + rh)) if full_img is not None else None
                     )
                     score = vision_utils.sold_badge_score(
                         (rx, ry, rw, rh), bp, sold_template, row_img=row_img
@@ -1776,9 +1765,7 @@ class CalibrationTab(QWidget):
                 detected = any(s >= 0.64 for s in scores)
                 score_str = ", ".join(f"{s:.2f}" for s in scores)
                 if detected:
-                    self.result_label.setText(
-                        f"✅ Sold badge detected (scores: {score_str})"
-                    )
+                    self.result_label.setText(f"✅ Sold badge detected (scores: {score_str})")
                 else:
                     self.result_label.setText(
                         f"❌ No sold badge detected (scores: {score_str}) — open AH with sold cars visible"
