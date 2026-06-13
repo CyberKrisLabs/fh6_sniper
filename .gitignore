@@ -10,7 +10,9 @@ env/
 # PyInstaller
 build/
 dist/
-*.spec
+
+# Installer output
+installer/Output/
 
 # VS Code
 .vscode/

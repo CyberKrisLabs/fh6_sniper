@@ -1139,16 +1139,21 @@ class SniperTab(QWidget):
         dlg.setCheckBox(skip_cb)
         calibrate_btn = dlg.addButton("Calibrate Now", QMessageBox.ButtonRole.AcceptRole)
         continue_btn = dlg.addButton("Continue Anyway", QMessageBox.ButtonRole.RejectRole)
+        # Track whether the user explicitly clicked a button — Qt activates the
+        # RejectRole button internally when the X / Escape is used, so
+        # clickedButton() alone cannot distinguish a real click from X-to-close.
+        _explicit: list[object] = []
+        calibrate_btn.clicked.connect(lambda: _explicit.append(calibrate_btn))
+        continue_btn.clicked.connect(lambda: _explicit.append(continue_btn))
         dlg.exec()
         if skip_cb.isChecked():
             settings.set_skip_recalibration_reminder(True)
-        clicked = dlg.clickedButton()
-        if clicked is None or clicked is calibrate_btn:
-            # X / close or "Calibrate Now" — do not start sniper
-            if clicked is calibrate_btn and callable(self._navigate_to_calibration):
+        explicitly_clicked = _explicit[0] if _explicit else None
+        if explicitly_clicked is calibrate_btn:
+            if callable(self._navigate_to_calibration):
                 self._navigate_to_calibration()
             return False
-        return clicked is continue_btn
+        return explicitly_clicked is continue_btn
 
     def _show_calib_warning(self) -> bool:
         dlg = QMessageBox(self)
@@ -1824,8 +1829,8 @@ class CalibrationTab(QWidget):
 # ---------------------------------------------------------------------------
 
 PRESETS = {
-    "Fast": {"buy_attempt_interval": 0.4, "post_buy_wait": 4.0, "reset_interval": 0.8},
-    "Mid": {"buy_attempt_interval": 0.6, "post_buy_wait": 5.0, "reset_interval": 0.9},
+    "Fast": {"buy_attempt_interval": 0.3, "post_buy_wait": 5.0, "reset_interval": 0.7},
+    "Mid": {"buy_attempt_interval": 0.5, "post_buy_wait": 5.5, "reset_interval": 0.8},
     "Slow": {"buy_attempt_interval": 0.7, "post_buy_wait": 6.0, "reset_interval": 1.1},
 }
 
@@ -2078,7 +2083,7 @@ class InfoTab(QWidget):
         gh_btn = QPushButton("Open")
         gh_btn.setFixedWidth(80)
         gh_btn.clicked.connect(
-            lambda: webbrowser.open("https://github.com/CyberKrisLabs/forza-horizon-6-sniper")
+            lambda: webbrowser.open("https://github.com/CyberKrisLabs/fh6_sniper")
         )
         gh_row.addWidget(gh_btn)
         gh_row.addStretch()
