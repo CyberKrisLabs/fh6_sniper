@@ -32,12 +32,12 @@ from PySide6.QtWidgets import (
 )
 
 import calibrator
-import logger
 import settings
 import sniper
 import theme
 import vision_utils
 import window_utils
+from sniper import SOLD_THRESHOLD
 
 try:
     import requests  # type: ignore
@@ -683,6 +683,7 @@ class SniperTab(QWidget):
         self._calib_tab = None  # set by main window after CalibrationTab is constructed
         self._navigate_to_calibration = None
         self._active_cal_overlay: _CalibrationOverlay | None = None
+        self._child_procs: list[subprocess.Popen] = []
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self._tick_timer)
@@ -1414,12 +1415,13 @@ class CalibrationTab(QWidget):
     def _launch_row_tuner(self) -> None:
         if getattr(sys, "frozen", False):
             # Compiled exe — launch a second instance of ourselves in tune-rows mode
-            subprocess.Popen([sys.executable, "--tune-rows"])
+            proc = subprocess.Popen([sys.executable, "--tune-rows"])
         else:
             script = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "tools", "tune_rows.py"
             )
-            subprocess.Popen([sys.executable, script])
+            proc = subprocess.Popen([sys.executable, script])
+        self._child_procs.append(proc)
 
     # ── Slots ──────────────────────────────────────────────────────────────
 
@@ -1773,7 +1775,7 @@ class CalibrationTab(QWidget):
                         (rx, ry, rw, rh), bp, sold_template, row_img=row_img
                     )
                     scores.append(score)
-                detected = any(s >= 0.64 for s in scores)
+                detected = any(s >= SOLD_THRESHOLD for s in scores)
                 score_str = ", ".join(f"{s:.2f}" for s in scores)
                 if detected:
                     self.result_label.setText(f"✅ Sold badge detected (scores: {score_str})")
@@ -2180,6 +2182,7 @@ class MainWindow(QMainWindow):
             pass
 
         sniper_tab = SniperTab()
+        self._sniper_tab = sniper_tab
         calib_tab = CalibrationTab(sniper_tab)
         sniper_tab._calib_tab = calib_tab
         settings_tab = SettingsTab(sniper_tab)
@@ -2233,7 +2236,28 @@ class MainWindow(QMainWindow):
 
         sniper_tab._navigate_to_calibration = lambda: nav.setCurrentRow(1)
 
-        logger.init_logger(None)
+    def closeEvent(self, event) -> None:
+        # Stop sniper loop so its daemon thread exits cleanly.
+        self._sniper_tab._stop_event.set()
+
+        # Terminate any tracked child processes (e.g. Row Tuner subprocess).
+        for proc in self._sniper_tab._child_procs:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
+        # Close every other top-level window (overlays, dialogs).
+        # Without this, Qt's quitOnLastWindowClosed keeps app.exec() alive
+        # even after the main window is gone, so the process never exits.
+        for w in QApplication.topLevelWidgets():
+            if w is not self:
+                try:
+                    w.close()
+                except Exception:
+                    pass
+
+        event.accept()
 
 
 def main():
@@ -2246,6 +2270,7 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet(theme.STYLESHEET)
+    app.aboutToQuit.connect(vision_utils.release_dxcam)
 
     win = MainWindow()
     win.show()

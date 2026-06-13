@@ -36,13 +36,12 @@ def isolate_config(tmp_path, monkeypatch):
     return cfg
 
 
-def test_buy_sequence_aborts_when_unfocused(monkeypatch, capsys):
+def test_buy_sequence_aborts_when_unfocused(monkeypatch):
     monkeypatch.setattr(window_utils, "is_fh6_focused", lambda: False)
-    res = sniper.buy_sequence(settings.load_timings())
+    messages = []
+    res = sniper.buy_sequence(settings.load_timings(), log=messages.append)
     assert res is None
-    # check log printed
-    captured = capsys.readouterr()
-    assert "Buy sequence aborted" in captured.out
+    assert any("Buy sequence aborted" in m for m in messages)
 
 
 def test_buy_sequence_success_and_failure(monkeypatch):

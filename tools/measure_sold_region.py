@@ -32,13 +32,7 @@ from PySide6.QtWidgets import (
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import window_utils
-
-# ── Row formula (kept in sync with preview_rows.py) ─────────────────────────
-
-ROW_X_PCT = 0.041
-ROW_Y_START_PCT = 0.1095
-ROW_HEIGHT_PCT = 0.1163
-ROW_WIDTH_PCT = 0.2999
+from window_utils import ROW_HEIGHT_PCT, ROW_WIDTH_PCT, ROW_X_PCT, ROW_Y_START_PCT
 
 # ── Default badge box (fraction of row card) ─────────────────────────────────
 # Starting guess: top-left ~15 % wide × 40 % tall of the card.

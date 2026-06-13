@@ -14,7 +14,6 @@ import time
 import pyautogui
 
 import calibrator
-import logger
 import vision_utils
 import window_utils
 
@@ -26,6 +25,7 @@ pyautogui.FAILSAFE = False
 # Base confidence used for auto-calibrated templates. Other call sites
 # already use lower, tuned thresholds (~0.65–0.72); 0.8 was too strict here.
 CONFIDENCE = 0.7
+SOLD_THRESHOLD = 0.64
 CONFIG_FILE = window_utils.get_config_file()
 
 # -------------------------
@@ -231,6 +231,7 @@ def find_last_available_row(
     row_regions: list,
     badge_params: dict | None,
     sold_template: str,
+    log=None,
 ) -> int:
     """Scan all visible rows and return the 0-based index of the LAST available one.
 
@@ -265,29 +266,29 @@ def find_last_available_row(
             else vision_utils.grab_region(row_reg)
         )
         if not vision_utils.row_has_car(row_reg, row_img=row_img):
-            logger.update_log(f"  Row {idx + 1}: empty — stop scanning")
+            if log:
+                log(f"  Row {idx + 1}: empty — stop scanning")
             break
 
         if badge_params and os.path.isfile(sold_template):
             score = vision_utils.sold_badge_score(
                 row_reg, badge_params, sold_template, row_img=row_img
             )
-            # Threshold tuned empirically: real sold badges score ≥0.72 when
-            # the badge is clearly visible; lowered to 0.65 to tolerate minor
-            # rendering variation (row highlight, compression, etc.).
-            # Check sniper.log for "sold/available [score]" to tune further.
-            SOLD_THRESHOLD = 0.64
             if score >= SOLD_THRESHOLD:
-                logger.update_log(f"  Row {idx + 1}: sold [{score:.2f} ≥{SOLD_THRESHOLD}]")
+                if log:
+                    log(f"  Row {idx + 1}: sold [{score:.2f} ≥{SOLD_THRESHOLD}]")
                 continue
             if score < 0.10:
                 # Score this low means detection failed (transition frame, bad region, etc.)
                 # Default to sold so we never attempt a buy on a detection failure.
-                logger.update_log(f"  Row {idx + 1}: uncertain [{score:.2f}] — skipping")
+                if log:
+                    log(f"  Row {idx + 1}: uncertain [{score:.2f}] — skipping")
                 continue
-            logger.update_log(f"  Row {idx + 1}: available [{score:.2f} <{SOLD_THRESHOLD}]")
+            if log:
+                log(f"  Row {idx + 1}: available [{score:.2f} <{SOLD_THRESHOLD}]")
         else:
-            logger.update_log(f"  Row {idx + 1}: available")
+            if log:
+                log(f"  Row {idx + 1}: available")
         last_available = idx
 
     return last_available
@@ -352,9 +353,6 @@ def _detect_buy_result(raw, full_region=None):
         fail_score = _score(_variants(base_fail))
 
         print(f"Buy detection: success={succ_score:.3f}  fail={fail_score:.3f}  threshold={conf}")
-        logger.update_log(
-            f"  Buy scores → success={succ_score:.3f}  fail={fail_score:.3f}  threshold={conf}"
-        )
 
         if succ_score >= conf and succ_score > fail_score:
             return True
@@ -365,20 +363,22 @@ def _detect_buy_result(raw, full_region=None):
     return None
 
 
-def buy_sequence(t, full_region=None, stop_event=None):
+def buy_sequence(t, full_region=None, stop_event=None, log=None):
     """Perform buy sequence and detect success/failure via screenshots.
 
     Args:
         t: timing configuration dict
         full_region: optional region to limit post-buy image searches (entire window)
         stop_event: threading.Event — waits can be interrupted instantly on stop
+        log: optional callable for status messages
 
     Returns:
       True if buy succeeded, False if failed, None if undetermined.
     """
     try:
         if not window_utils.is_fh6_focused():
-            logger.update_log("🔒 Buy sequence aborted: FH6 not focused")
+            if log:
+                log("🔒 Buy sequence aborted: FH6 not focused")
             return None
     except Exception:
         return None
@@ -400,11 +400,10 @@ def buy_sequence(t, full_region=None, stop_event=None):
     result = _detect_buy_result(raw, full_region)
 
     pyautogui.typewrite(["\n", "esc", "esc", "\n", "\n"], interval=t["reset_interval"])
-    print("Attempt complete — returned to start.")
     return result
 
 
-def reset_search(t, stop_event=None):
+def reset_search(t, stop_event=None, log=None):
     # Wait for FH6 focus before sending the reset keystrokes; if the user
     # clicks away, this will pause instead of sending Esc to other apps.
     try:
@@ -415,7 +414,8 @@ def reset_search(t, stop_event=None):
     # final safety check
     try:
         if not window_utils.is_fh6_focused():
-            logger.update_log("🔒 Reset aborted: FH6 not focused")
+            if log:
+                log("🔒 Reset aborted: FH6 not focused")
             return
     except Exception:
         return
@@ -556,7 +556,7 @@ def sniper_loop(
 
                     if row_regions and badge_params:
                         available = find_last_available_row(
-                            row_regions, badge_params, sold_template
+                            row_regions, badge_params, sold_template, log=logger_callback
                         )
                     else:
                         available = 0  # no row data — attempt buy on current row
@@ -564,7 +564,7 @@ def sniper_loop(
                     if available < 0:
                         refreshes += 1
                         logger_callback(f"Scan #{i + 1} 🏷️  All visible rows sold — resetting")
-                        reset_search(timings, stop_event=stop_event)
+                        reset_search(timings, stop_event=stop_event, log=logger_callback)
                     else:
                         buy_attempts += 1
                         logger_callback(
@@ -586,7 +586,10 @@ def sniper_loop(
                                 pass
 
                         result = buy_sequence(
-                            timings, full_region=full_region, stop_event=stop_event
+                            timings,
+                            full_region=full_region,
+                            stop_event=stop_event,
+                            log=logger_callback,
                         )
                         if result is True:
                             successes += 1

@@ -32,15 +32,14 @@ from PySide6.QtWidgets import (
 )
 
 import window_utils
+from window_utils import (
+    ROW_HEIGHT_PCT,
+    ROW_STEP_PCT,
+    ROW_WIDTH_PCT,
+    ROW_X_PCT,
+    ROW_Y_START_PCT,
+)
 
-# ── Formula defaults ──────────────────────────────────────────────────────────
-
-ROW_X_PCT = 0.041
-ROW_Y_START_PCT = 0.1095
-ROW_HEIGHT_PCT = 0.1163
-ROW_WIDTH_PCT = 0.2999
-ROW_GAP_PCT = 0.0049
-ROW_STEP_PCT = ROW_HEIGHT_PCT + ROW_GAP_PCT
 NUM_ROWS = 4
 
 ROW_COLORS = [

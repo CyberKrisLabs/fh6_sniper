@@ -40,6 +40,24 @@ def _get_dxcam():
     return _dxcam_instance
 
 
+def release_dxcam() -> None:
+    """Release the DXGI Desktop Duplication handle before process exit.
+
+    dxcam holds a COM IDXGIOutputDuplication reference.  If it isn't
+    explicitly released, Python's module-teardown order can cause the
+    underlying COM object to be destroyed after the COM runtime has already
+    been uninitialised, resulting in a hang that prevents the process from
+    exiting cleanly.  Call this from app.aboutToQuit before sys.exit().
+    """
+    global _dxcam_instance
+    if _dxcam_instance is not None:
+        try:
+            _dxcam_instance.release()
+        except Exception:
+            pass
+        _dxcam_instance = None
+
+
 def grab_full_screen() -> Image | None:
     """Capture the entire primary display using DXGI Desktop Duplication.
 
