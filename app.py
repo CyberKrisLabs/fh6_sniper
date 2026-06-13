@@ -683,7 +683,6 @@ class SniperTab(QWidget):
         self._calib_tab = None  # set by main window after CalibrationTab is constructed
         self._navigate_to_calibration = None
         self._active_cal_overlay: _CalibrationOverlay | None = None
-        self._child_procs: list[subprocess.Popen] = []
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self._tick_timer)
@@ -1413,15 +1412,17 @@ class CalibrationTab(QWidget):
         root.addLayout(test_row)
 
     def _launch_row_tuner(self) -> None:
-        if getattr(sys, "frozen", False):
-            # Compiled exe — launch a second instance of ourselves in tune-rows mode
-            proc = subprocess.Popen([sys.executable, "--tune-rows"])
-        else:
-            script = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "tools", "tune_rows.py"
-            )
-            proc = subprocess.Popen([sys.executable, script])
-        self._child_procs.append(proc)
+        from row_tuner import ControlPanel, TuneOverlay
+
+        if getattr(self, "_row_tuner_panel", None) and self._row_tuner_panel.isVisible():
+            self._row_tuner_panel.raise_()
+            self._row_tuner_panel.activateWindow()
+            return
+
+        overlay = TuneOverlay()
+        panel = ControlPanel(overlay)
+        panel.show()
+        self._row_tuner_panel = panel
 
     # ── Slots ──────────────────────────────────────────────────────────────
 
@@ -2240,13 +2241,6 @@ class MainWindow(QMainWindow):
         # Stop sniper loop so its daemon thread exits cleanly.
         self._sniper_tab._stop_event.set()
 
-        # Terminate any tracked child processes (e.g. Row Tuner subprocess).
-        for proc in self._sniper_tab._child_procs:
-            try:
-                proc.terminate()
-            except Exception:
-                pass
-
         # Close every other top-level window (overlays, dialogs).
         # Without this, Qt's quitOnLastWindowClosed keeps app.exec() alive
         # even after the main window is gone, so the process never exits.
@@ -2261,12 +2255,6 @@ class MainWindow(QMainWindow):
 
 
 def main():
-    if "--tune-rows" in sys.argv:
-        import row_tuner
-
-        row_tuner.main()
-        return
-
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet(theme.STYLESHEET)
@@ -2274,7 +2262,10 @@ def main():
 
     win = MainWindow()
     win.show()
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    # os._exit bypasses Python's module-teardown phase, which can hang when C-extension
+    # globals (dxcam, cv2, numpy) are destroyed in an undefined order at interpreter shutdown.
+    os._exit(exit_code)
 
 
 if __name__ == "__main__":

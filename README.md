@@ -6,7 +6,7 @@ Automated auction house sniper for Forza Horizon 6. Continuously scans for avail
 
 ## Getting Started
 
-**Requirements:** Python 3.10+, Forza Horizon 6 running in windowed mode
+**Requirements:** Python 3.10+, Windows 10/11, Forza Horizon 6
 
 ```bash
 pip install -r requirements.txt
@@ -33,9 +33,10 @@ Every keystroke is gated behind a focus check — if FH6 loses focus, the sniper
 | Feature | Description |
 |---|---|
 | Auto & Manual Calibration | Pinpoints the exact screen region to watch for maximum speed |
-| Multi-scale Detection | Finds buttons at any window size using 18-step scale search |
+| Multi-scale Detection | Finds buttons at any window size using 24-step scale search |
 | Timing Presets | Fast / Mid / Slow presets tuned for different PC and connection speeds |
 | Focus Safety | Stops sending keystrokes the moment FH6 is no longer the active window |
+| In-game Overlay | Frameless always-on-top HUD showing live stats without alt-tabbing |
 | Live Stats | Tracks buy attempts, successes, failures, and refreshes in real time |
 | Color-coded Log | GUI log with emoji markers; everything also written to `sniper.log` |
 | Standalone EXE | Packages into a single executable with PyInstaller |
@@ -46,9 +47,9 @@ Every keystroke is gated behind a focus check — if FH6 loses focus, the sniper
 
 | Preset | Buy Interval | Post-buy Wait | Reset Interval | Best For |
 |---|---|---|---|---|
-| Fast | 0.4 s | 4 s | 0.8 s | High-end PC, fast connection |
-| Mid | 0.6 s | 5 s | 0.9 s | Average PC, stable connection |
-| Slow | 0.7 s | 6 s | 1.1 s | Slower PC or laggy connection |
+| Fast | 0.3 s | 5.0 s | 0.7 s | High-end PC, fast connection |
+| Mid | 0.5 s | 5.5 s | 0.8 s | Average PC, stable connection |
+| Slow | 0.7 s | 6.0 s | 1.1 s | Slower PC or laggy connection |
 | Custom | — | — | — | Manual control over each value |
 
 ---
@@ -57,40 +58,38 @@ Every keystroke is gated behind a focus check — if FH6 loses focus, the sniper
 
 Calibration tells the sniper exactly where on your screen to look, which makes detection faster and more reliable.
 
-- **Auto Calibration** — takes a screenshot and finds the auction button automatically. Try this first.
-- **Manual Calibration** — you click the top-left and bottom-right corners of the button. Use this if auto fails or if you have an unusual window layout.
+- **Auto Calibration** — takes a screenshot and finds the auction button automatically. Works in windowed and fullscreen mode. Try this first.
+- **Manual Calibration** — hover your mouse over the top-left corner of the button and confirm, then do the same for the bottom-right corner. Use this if auto fails or if you have an unusual window layout.
+- **Row Calibration** — fine-tunes the individual auction row positions used for sold-badge detection.
 
-Recalibrate any time you resize or move the FH6 window.
+Recalibrate any time you resize, move, or switch between windowed and fullscreen.
 
 ---
 
 ## Building a Standalone EXE
 
 ```powershell
-pyinstaller --onefile --windowed `
-  --name "FH6 Sniper" `
-  --icon "assets\sniper.ico" `
-  --add-data "assets;assets" `
-  app.py
+pyinstaller "FH6 Sniper.spec"
 ```
 
 Output: `dist\FH6 Sniper.exe`
 
-Asset paths are resolved at runtime via `window_utils.resource_path`, which handles both normal Python execution and the PyInstaller `--onefile` bundle.
+The spec file already includes the correct icon, assets, docs, and hidden imports for pywin32. Asset paths are resolved at runtime via `window_utils.resource_path`, which handles both normal Python execution and the PyInstaller bundle.
 
 ---
 
 ## Project Structure
 
 ```
-app.py            GUI entry point (ttkbootstrap)
+app.py            GUI entry point (PySide6)
 sniper.py         Core scan and buy loop
 vision_utils.py   OpenCV template matching engine
 calibrator.py     Region calibration (auto + manual)
 window_utils.py   FH6 window detection and DPI handling
 settings.py       Config file management
-logger.py         Thread-safe GUI + file logging
+row_tuner.py      Interactive row position tuning tool
 assets/           Template images for detection
+tools/            Developer diagnostic scripts
 tests/            pytest test suite
 docs/             Project documentation
 ```
@@ -114,8 +113,12 @@ Vision tests monkeypatch `pyautogui.screenshot` to simulate the screen, so FH6 d
 | Button not detected | Run Auto Calibration, or try Manual if the window is at an unusual size |
 | Scans feel slow | Calibrate to a tighter region around the button |
 | Keystrokes not landing | Make sure FH6 is the foreground window when you start |
-| Auto calibration fails | Resize the FH6 window slightly, then retry |
+| Auto calibration fails | Make sure the Auction House is open and visible, then retry |
 | False positives / misfires | Increase timing intervals in the Settings tab |
+
+**Config and log locations** (useful for debugging):
+- Config: `%APPDATA%\FH6Sniper\config.json`
+- Log: `sniper.log` in the same folder as the exe
 
 ---
 

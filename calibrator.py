@@ -242,8 +242,10 @@ def find_template_at_best_scale(template_path):
         screen_gray = cv2.cvtColor(screen_img, cv2.COLOR_BGR2GRAY)
         screen_h, screen_w = screen_gray.shape[:2]
 
-        # Try different scales
-        scales_to_try = np.linspace(1.0, 0.4, 18)  # Start with full size, go down
+        # Try different scales. Go above 1.0 so the template can match a larger
+        # button in fullscreen mode (where the game renders at the monitor's
+        # native resolution and the button is physically bigger than the template).
+        scales_to_try = np.linspace(1.5, 0.4, 24)
 
         for scale in scales_to_try:
             t_h = int(template_h * scale)

@@ -73,20 +73,64 @@
         "height": 1392,
         "dpr": 1.5
       },
-      "badge_x_pct": 0.036312849162011177,
-      "badge_y_pct": 0.075,
-      "badge_w_pct": 0.19646182495344505,
-      "badge_h_pct": 0.5541666666666667,
-      "badge_dx_px": 39,
-      "badge_dy_px": 18,
-      "badge_w_px": 211,
-      "badge_h_px": 133,
+      "badge_x_pct": 0.0698,
+      "badge_y_pct": 0.2208,
+      "badge_w_pct": 0.1425,
+      "badge_h_pct": 0.325,
+      "badge_dx_px": 75,
+      "badge_dy_px": 53,
+      "badge_w_px": 153,
+      "badge_h_px": 78,
       "row_ref_px": [
         1074,
         240
       ],
-      "calibration_score": 1.0,
-      "note": "Manually calibrated via hover capture (20 px margin applied)."
+      "calibration_score": 0.8502,
+      "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
+    },
+    {
+      "label": "2830x1635",
+      "window_ref_physical": {
+        "width": 2830,
+        "height": 1635,
+        "dpr": 1.5
+      },
+      "badge_x_pct": 0.0671,
+      "badge_y_pct": 0.195,
+      "badge_w_pct": 0.1452,
+      "badge_h_pct": 0.3369,
+      "badge_dx_px": 85,
+      "badge_dy_px": 55,
+      "badge_w_px": 184,
+      "badge_h_px": 95,
+      "row_ref_px": [
+        1267,
+        282
+      ],
+      "calibration_score": 0.9049,
+      "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
+    },
+    {
+      "label": "3840x2160",
+      "window_ref_physical": {
+        "width": 3840,
+        "height": 2160,
+        "dpr": 1.5
+      },
+      "badge_x_pct": 0.0598,
+      "badge_y_pct": 0.1394,
+      "badge_w_pct": 0.1452,
+      "badge_h_pct": 0.3458,
+      "badge_dx_px": 103,
+      "badge_dy_px": 52,
+      "badge_w_px": 250,
+      "badge_h_px": 129,
+      "row_ref_px": [
+        1722,
+        373
+      ],
+      "calibration_score": 0.9078,
+      "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
     }
   ]
 }
