@@ -549,11 +549,6 @@ def select_sold_badge_template(win=None) -> str:
     return base
 
 
-_BADGE_CAL_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "docs", "sold_badge_region.json"
-)
-
-
 def auto_calibrate_sold_badge(status_label=None) -> dict | None:
     """Detect the sold badge position by template-searching all visible auction rows.
 

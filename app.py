@@ -1412,8 +1412,14 @@ class CalibrationTab(QWidget):
         root.addLayout(test_row)
 
     def _launch_row_tuner(self) -> None:
-        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools", "tune_rows.py")
-        subprocess.Popen([sys.executable, script])
+        if getattr(sys, "frozen", False):
+            # Compiled exe — launch a second instance of ourselves in tune-rows mode
+            subprocess.Popen([sys.executable, "--tune-rows"])
+        else:
+            script = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "tools", "tune_rows.py"
+            )
+            subprocess.Popen([sys.executable, script])
 
     # ── Slots ──────────────────────────────────────────────────────────────
 
@@ -2231,6 +2237,12 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    if "--tune-rows" in sys.argv:
+        import row_tuner
+
+        row_tuner.main()
+        return
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet(theme.STYLESHEET)

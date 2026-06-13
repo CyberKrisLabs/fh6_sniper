@@ -56,6 +56,33 @@ def resource_path(relative_path: str) -> str:
     return os.path.join(base, relative_path)
 
 
+def get_user_data_file(filename: str) -> str:
+    """Return a user-writable path for a runtime data file.
+
+    When running from source: returns ``docs/<filename>`` so calibration data
+    stays in the repo as before.
+    When running as a compiled exe (PyInstaller): returns
+    ``%APPDATA%\\FH6Sniper\\<filename>`` and seeds the file from the bundled
+    ``docs/`` default the first time it is requested.
+    """
+    if not getattr(sys, "frozen", False):
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", filename)
+
+    app_data = os.environ.get("APPDATA") or os.path.expanduser("~")
+    data_dir = os.path.join(app_data, "FH6Sniper")
+    os.makedirs(data_dir, exist_ok=True)
+    path = os.path.join(data_dir, filename)
+
+    if not os.path.isfile(path):
+        bundled = resource_path(os.path.join("docs", filename))
+        if os.path.isfile(bundled):
+            import shutil
+
+            shutil.copy2(bundled, path)
+
+    return path
+
+
 def get_config_file() -> str:
     """Return the full path to config.json in a user-writable location.
 
@@ -279,9 +306,7 @@ def get_tuned_row_regions(win, num_rows: int = 4) -> list[tuple[int, int, int, i
 
     Returns an empty list if the file is missing or cannot be applied.
     """
-    tuned_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "docs", "row_regions_tuned.json"
-    )
+    tuned_path = get_user_data_file("row_regions_tuned.json")
     if not os.path.isfile(tuned_path):
         return []
     try:
@@ -325,9 +350,7 @@ def get_tuned_row_regions(win, num_rows: int = 4) -> list[tuple[int, int, int, i
         return []
 
 
-_BADGE_REGION_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "docs", "sold_badge_region.json"
-)
+_BADGE_REGION_PATH = get_user_data_file("sold_badge_region.json")
 
 
 def load_badge_params(win_w: int | None = None, win_h: int | None = None) -> dict | None:
