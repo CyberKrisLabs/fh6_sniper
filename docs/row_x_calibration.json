@@ -1,0 +1,18 @@
+{
+  "step1_window": {
+    "width": 3474,
+    "height": 1998,
+    "x": 228,
+    "y": 16
+  },
+  "step2_window": {
+    "width": 2189,
+    "height": 1275,
+    "x": 1513,
+    "y": 16
+  },
+  "x_correction_px": -453,
+  "effective_rel_x_px": -443,
+  "effective_x_pct": -0.2024,
+  "note": "At step1 ROW_X_PCT was 0.0047. At step2 window (2189x1275), corrected rel_x=-443px (-20.24%). Update ROW_X_PCT to -0.2024 if this window size is your new reference."
+}

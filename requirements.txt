@@ -1,0 +1,11 @@
+PySide6
+pyautogui
+mss
+dxcam
+Pillow
+PyGetWindow
+opencv-python
+numpy
+pywin32
+requests
+pytest

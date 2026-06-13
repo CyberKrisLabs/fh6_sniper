@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+venv/
+.venv/
+env/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# VS Code
+.vscode/
+
+# Log for sniper and config file
+config.json
+sniper.log
+
+# Tool caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Mcp Server
+start_mcp.bat
+mcp_server/
+ 
+# Local automation scripts
+tools/auto_race.py

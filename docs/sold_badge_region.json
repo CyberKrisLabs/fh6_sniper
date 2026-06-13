@@ -1,0 +1,92 @@
+{
+  "profiles": [
+    {
+      "label": "3265x1881",
+      "window_ref_physical": {
+        "width": 3265,
+        "height": 1881,
+        "dpr": 1.0
+      },
+      "badge_x_pct": 0.0668,
+      "badge_y_pct": 0.2329,
+      "badge_w_pct": 0.1432,
+      "badge_h_pct": 0.3323,
+      "badge_dx_px": 98,
+      "badge_dy_px": 75,
+      "badge_w_px": 210,
+      "badge_h_px": 107,
+      "row_ref_px": [
+        1466,
+        322
+      ],
+      "calibration_score": 0.8258,
+      "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
+    },
+    {
+      "label": "2420x1855",
+      "window_ref_physical": {
+        "width": 2420,
+        "height": 1855,
+        "dpr": 1.5
+      },
+      "badge_x_pct": 0.0691,
+      "badge_y_pct": 0.2282,
+      "badge_w_pct": 0.1436,
+      "badge_h_pct": 0.332,
+      "badge_dx_px": 75,
+      "badge_dy_px": 55,
+      "badge_w_px": 156,
+      "badge_h_px": 80,
+      "row_ref_px": [
+        1086,
+        241
+      ],
+      "calibration_score": 0.8971,
+      "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
+    },
+    {
+      "label": "2663x2041",
+      "window_ref_physical": {
+        "width": 2663,
+        "height": 2041,
+        "dpr": 1.5
+      },
+      "badge_x_pct": 0.0678,
+      "badge_y_pct": 0.2906,
+      "badge_w_pct": 0.1448,
+      "badge_h_pct": 0.3283,
+      "badge_dx_px": 81,
+      "badge_dy_px": 77,
+      "badge_w_px": 173,
+      "badge_h_px": 87,
+      "row_ref_px": [
+        1195,
+        265
+      ],
+      "calibration_score": 0.8967,
+      "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
+    },
+    {
+      "label": "2396x1392",
+      "window_ref_physical": {
+        "width": 2396,
+        "height": 1392,
+        "dpr": 1.5
+      },
+      "badge_x_pct": 0.036312849162011177,
+      "badge_y_pct": 0.075,
+      "badge_w_pct": 0.19646182495344505,
+      "badge_h_pct": 0.5541666666666667,
+      "badge_dx_px": 39,
+      "badge_dy_px": 18,
+      "badge_w_px": 211,
+      "badge_h_px": 133,
+      "row_ref_px": [
+        1074,
+        240
+      ],
+      "calibration_score": 1.0,
+      "note": "Manually calibrated via hover capture (20 px margin applied)."
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+ruff
+mypy
+pytest-cov
+pytest-qt
+PySide6
+pre-commit
