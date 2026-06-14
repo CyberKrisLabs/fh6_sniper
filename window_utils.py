@@ -256,18 +256,14 @@ def get_row_regions(win, num_rows: int = 4) -> list[tuple[int, int, int, int]]:
     tuned = get_tuned_row_regions(win, num_rows)
     if tuned:
         return tuned
-    dpr = _get_display_dpr()
     wx, wy, ww, wh = win.left, win.top, win.width, win.height
-    # Compute in Qt logical space then scale to physical (mirrors test_detection.py)
-    x_log = int(wx / dpr + (ww / dpr) * ROW_X_PCT)
-    w_log = int(ww * ROW_WIDTH_PCT)
-    h_log = int(wh * ROW_HEIGHT_PCT)
-    y0_log = wy + int(wh * ROW_Y_START_PCT)
-    step_log = int(wh * ROW_STEP_PCT)
-    return [
-        (int(x_log * dpr), int((y0_log + i * step_log) * dpr), int(w_log * dpr), int(h_log * dpr))
-        for i in range(num_rows)
-    ]
+    # pygetwindow and pyautogui both use physical pixels — apply percentages directly.
+    x = int(wx + ww * ROW_X_PCT)
+    y0 = int(wy + wh * ROW_Y_START_PCT)
+    w = int(ww * ROW_WIDTH_PCT)
+    h = int(wh * ROW_HEIGHT_PCT)
+    step = int(wh * ROW_STEP_PCT)
+    return [(x, y0 + i * step, w, h) for i in range(num_rows)]
 
 
 def best_matching_row_profile(
@@ -337,13 +333,14 @@ def get_tuned_row_regions(win, num_rows: int = 4) -> list[tuple[int, int, int, i
         wx, wy, ww, wh = win.left, win.top, win.width, win.height
         result = []
         for r in rows_pct[:num_rows]:
-            # Qt logical rect (same formula as tune_rows._base_rows)
-            x_log = int(wx / dpr + (ww / dpr) * r["x_pct"])
-            y_log = wy + int(wh * r["y_pct"])
-            w_log = int(ww * r["w_pct"])
-            h_log = int(wh * r["h_pct"])
-            # Scale to physical pyautogui coordinates
-            result.append((int(x_log * dpr), int(y_log * dpr), int(w_log * dpr), int(h_log * dpr)))
+            # Percentages are physical fractions; pygetwindow and pyautogui both
+            # use physical pixels so no DPR conversion is needed here.
+            result.append((
+                int(wx + ww * r["x_pct"]),
+                int(wy + wh * r["y_pct"]),
+                int(ww * r["w_pct"]),
+                int(wh * r["h_pct"]),
+            ))
         return result
     except Exception as e:
         print(f"⚠️  get_tuned_row_regions: {e}")

@@ -61,12 +61,13 @@ def _dpr() -> float:
 
 
 def _base_rows(win_x: int, win_y: int, win_w: int, win_h: int) -> list[tuple[int, int, int, int]]:
+    # All coordinates in Qt logical pixels (physical ÷ DPR) for the overlay widget.
     dpr = _dpr()
     x = int(win_x / dpr + (win_w / dpr) * ROW_X_PCT)
-    w = int(win_w * ROW_WIDTH_PCT)
-    h = int(win_h * ROW_HEIGHT_PCT)
-    y0 = win_y + int(win_h * ROW_Y_START_PCT)
-    step = int(win_h * ROW_STEP_PCT)
+    w = int((win_w / dpr) * ROW_WIDTH_PCT)
+    h = int((win_h / dpr) * ROW_HEIGHT_PCT)
+    y0 = int(win_y / dpr + (win_h / dpr) * ROW_Y_START_PCT)
+    step = int((win_h / dpr) * ROW_STEP_PCT)
     return [(x, y0 + i * step, w, h) for i in range(NUM_ROWS)]
 
 
@@ -377,14 +378,16 @@ class ControlPanel(QWidget):
 
         if hasattr(self, "_pending_tuned") and self._win_phys:
             wx, wy, ww, wh = self._win_phys
+            ww_log = ww / dpr
+            wh_log = wh / dpr
             rows_to_apply = _load_tuned(ww, wh)
             if rows_to_apply:
                 for i, row_pct in enumerate(rows_to_apply[:NUM_ROWS]):
                     bx, by, bw, bh = self._base[i]
-                    tx = int(wx / dpr + (ww / dpr) * row_pct["x_pct"])
-                    ty = wy + int(wh * row_pct["y_pct"])
-                    tw = int(ww * row_pct["w_pct"])
-                    th = int(wh * row_pct["h_pct"])
+                    tx = int(wx / dpr + ww_log * row_pct["x_pct"])
+                    ty = int(wy / dpr + wh_log * row_pct["y_pct"])
+                    tw = int(ww_log * row_pct["w_pct"])
+                    th = int(wh_log * row_pct["h_pct"])
                     self._adjs[i] = [tx - bx, ty - by, tw - bw, th - bh]
             del self._pending_tuned
 
@@ -396,10 +399,12 @@ class ControlPanel(QWidget):
             bx, by, bw, bh = self._base[self._sel]
             wx, wy, ww, wh = self._win_phys
             dx, dy, dw, dh = self._adjs[self._sel]
-            x_pct = (rx - wx / dpr) / (ww / dpr) if ww else 0
-            y_pct = (ry - wy) / wh if wh else 0
-            w_pct = rw / ww if ww else 0
-            h_pct = rh / wh if wh else 0
+            ww_log = ww / dpr
+            wh_log = wh / dpr
+            x_pct = (rx - wx / dpr) / ww_log if ww_log else 0
+            y_pct = (ry - wy / dpr) / wh_log if wh_log else 0
+            w_pct = rw / ww_log if ww_log else 0
+            h_pct = rh / wh_log if wh_log else 0
             self.row_info.setText(
                 f"Row {self._sel + 1}:  ({rx},{ry})  {rw}x{rh} px\n"
                 f"  adj: dx={dx:+d} dy={dy:+d} dw={dw:+d} dh={dh:+d}\n"
@@ -414,15 +419,17 @@ class ControlPanel(QWidget):
 
         wx, wy, ww, wh = self._win_phys
         dpr = _dpr()
+        ww_log = ww / dpr
+        wh_log = wh / dpr
         rows = self._current_rows()
         row_data = []
         for rx, ry, rw, rh in rows:
             row_data.append(
                 {
-                    "x_pct": round((rx - wx / dpr) / (ww / dpr), 4) if ww else 0,
-                    "y_pct": round((ry - wy) / wh, 4) if wh else 0,
-                    "w_pct": round(rw / ww, 4) if ww else 0,
-                    "h_pct": round(rh / wh, 4) if wh else 0,
+                    "x_pct": round((rx - wx / dpr) / ww_log, 4) if ww_log else 0,
+                    "y_pct": round((ry - wy / dpr) / wh_log, 4) if wh_log else 0,
+                    "w_pct": round(rw / ww_log, 4) if ww_log else 0,
+                    "h_pct": round(rh / wh_log, 4) if wh_log else 0,
                 }
             )
 
