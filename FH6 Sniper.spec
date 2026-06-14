@@ -3,7 +3,10 @@
 a = Analysis(
     ["app.py"],
     pathex=[],
-    binaries=[],
+    binaries=[
+        # winrt ships its own msvcp140.dll — include it alongside the .pyd files
+        (".venv/Lib/site-packages/winrt/msvcp140.dll", "."),
+    ],
     datas=[
         ("assets", "assets"),
         ("docs", "docs"),
@@ -14,6 +17,21 @@ a = Analysis(
         "win32gui",
         "win32process",
         "win32print",
+        # winrt OCR — imports are inside try/except so PyInstaller can't see them
+        "winrt._winrt",
+        "winrt._winrt_windows_foundation",
+        "winrt._winrt_windows_graphics_imaging",
+        "winrt._winrt_windows_media_ocr",
+        "winrt._winrt_windows_storage_streams",
+        "winrt.runtime",
+        "winrt.runtime._internals",
+        "winrt.runtime.interop",
+        "winrt.system",
+        "winrt.system.hresult",
+        "winrt.windows.foundation",
+        "winrt.windows.graphics.imaging",
+        "winrt.windows.media.ocr",
+        "winrt.windows.storage.streams",
     ],
     hookspath=[],
     hooksconfig={},
