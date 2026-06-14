@@ -393,12 +393,8 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
 
             # Find yellow blobs — the sold badge is a distinct yellow rectangle.
             hsv = cv2.cvtColor(row_bgr, cv2.COLOR_BGR2HSV)
-            yellow_mask = cv2.inRange(
-                hsv, np.array([24, 100, 100]), np.array([38, 255, 255])
-            )
-            contours, _ = cv2.findContours(
-                yellow_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-            )
+            yellow_mask = cv2.inRange(hsv, np.array([24, 100, 100]), np.array([38, 255, 255]))
+            contours, _ = cv2.findContours(yellow_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             if not contours:
                 continue
 

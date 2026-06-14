@@ -348,12 +348,14 @@ def get_tuned_row_regions(win, num_rows: int = 4) -> list[tuple[int, int, int, i
         for r in rows_pct[:num_rows]:
             # Percentages are physical fractions; pygetwindow and pyautogui both
             # use physical pixels so no DPR conversion is needed here.
-            result.append((
-                int(wx + ww * r["x_pct"]),
-                int(wy + wh * r["y_pct"]),
-                int(ww * r["w_pct"]),
-                int(wh * r["h_pct"]),
-            ))
+            result.append(
+                (
+                    int(wx + ww * r["x_pct"]),
+                    int(wy + wh * r["y_pct"]),
+                    int(ww * r["w_pct"]),
+                    int(wh * r["h_pct"]),
+                )
+            )
         return result
     except Exception as e:
         print(f"⚠️  get_tuned_row_regions: {e}")
