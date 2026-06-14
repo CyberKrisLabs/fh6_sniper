@@ -47,7 +47,7 @@ except Exception:
     requests = None
     HAVE_REQUESTS = False
 
-__version__ = "2.0.0"
+__version__ = "1.0.0"
 
 _icon_file = window_utils.resource_path("assets/sniper.ico")
 
@@ -433,6 +433,13 @@ class _IngameOverlay(QWidget):
         self._stop_btn.pressed.connect(self._on_overlay_interact)
         top_row.addWidget(self._stop_btn)
 
+        self._row_tuner_btn = QPushButton("Row Tuner")
+        self._row_tuner_btn.setFixedWidth(100)
+        self._row_tuner_btn.setProperty("class", "accent-btn")
+        self._row_tuner_btn.clicked.connect(self._launch_row_tuner_from_overlay)
+        self._row_tuner_btn.pressed.connect(self._on_overlay_interact)
+        top_row.addWidget(self._row_tuner_btn)
+
         self._auto_cal_btn = QPushButton("Auto Calibrate")
         self._auto_cal_btn.setFixedWidth(140)
         self._auto_cal_btn.setProperty("class", "accent-btn")
@@ -524,6 +531,11 @@ class _IngameOverlay(QWidget):
     def hide_calib_image(self) -> None:
         """Hide the template image from the log row (thread-safe)."""
         self._calib_img_signal.emit("")
+
+    def _launch_row_tuner_from_overlay(self) -> None:
+        calib_tab = self._sniper_tab._calib_tab
+        if calib_tab is not None:
+            calib_tab._launch_row_tuner()
 
     def _refresh(self) -> None:
         geometry = self._fh6_geometry()
@@ -644,6 +656,13 @@ class _IngameOverlay(QWidget):
         running = getattr(self._sniper_tab, "_sniper_running", False)
         self._start_btn.setEnabled(not running)
         self._stop_btn.setEnabled(running)
+        cal_busy = getattr(self._sniper_tab, "_calibration_in_progress", False)
+        avail = not cal_busy
+        has_manual = calibrator.has_manual_region()
+        has_auto = calibrator.has_auto_region()
+        self._auto_cal_btn.setEnabled(avail and not has_manual)
+        self._manual_auction_btn.setEnabled(avail and not has_auto)
+        self._manual_badge_btn.setEnabled(avail and not has_auto)
 
     def closeEvent(self, event) -> None:
         if getattr(self._sniper_tab, "_ingame_overlay", None) is self:
@@ -1259,24 +1278,88 @@ class CalibrationTab(QWidget):
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(10)
 
         _root_dir = os.path.dirname(os.path.abspath(__file__))
 
-        sub_tabs = QTabWidget()
+        _step_style = (
+            "QGroupBox { font-weight:bold; font-size:11pt;"
+            " border:1px solid #555; border-radius:6px;"
+            " margin-top:14px; padding-top:6px; }"
+            "QGroupBox::title { subcontrol-origin:margin; left:10px; }"
+        )
 
-        # ── Tab 0: Auto Calibration ───────────────────────────────────────
+        # ── STEP 1: Row Calibration ───────────────────────────────────────
+        step1 = QGroupBox("Step 1 — Row Calibration")
+        step1.setStyleSheet(_step_style)
+        s1_lay = QVBoxLayout(step1)
+        s1_lay.setSpacing(8)
+
+        s1_desc = QLabel(
+            "Align the scan regions to your auction listing rows. "
+            "At different resolutions or display scales the rows may need adjustment. "
+            "Open the Row Tuner to drag and resize each row interactively."
+        )
+        s1_desc.setWordWrap(True)
+        s1_desc.setStyleSheet("font-style:italic; color:#ccc;")
+        s1_lay.addWidget(s1_desc)
+
+        s1_btn_row = QHBoxLayout()
+        s1_btn_row.setSpacing(12)
+        self.tune_rows_btn = QPushButton("Open Row Tuner")
+        self.tune_rows_btn.setProperty("class", "accent-btn")
+        self.tune_rows_btn.setFixedWidth(160)
+        self.tune_rows_btn.clicked.connect(self._launch_row_tuner)
+        s1_btn_row.addWidget(self.tune_rows_btn)
+
+        self.row_status_label = QLabel("Using formula defaults — open Row Tuner to calibrate")
+        self.row_status_label.setStyleSheet("font-style:italic; color:#aaa;")
+        s1_btn_row.addWidget(self.row_status_label)
+        s1_btn_row.addStretch()
+        s1_lay.addLayout(s1_btn_row)
+
+        root.addWidget(step1)
+
+        # ── STEP 2: Detection Calibration ─────────────────────────────────
+        step2 = QGroupBox("Step 2 — Detection Calibration")
+        step2.setStyleSheet(_step_style)
+        s2_lay = QVBoxLayout(step2)
+        s2_lay.setSpacing(8)
+
+        s2_desc = QLabel(
+            "Calibrate the auction button and sold badge detection for your screen. "
+            "Auto is recommended. Manual lets you point to the regions with your mouse."
+        )
+        s2_desc.setWordWrap(True)
+        s2_desc.setStyleSheet("font-style:italic; color:#ccc;")
+        s2_lay.addWidget(s2_desc)
+
+        self.sub_tabs = QTabWidget()
+
+        # Auto tab
         auto_page = QWidget()
         auto_layout = QVBoxLayout(auto_page)
         auto_layout.setContentsMargins(10, 10, 10, 10)
+        auto_layout.setSpacing(8)
+
+        self.auto_blocked_notice = QLabel(
+            "Manual calibration is active. Remove it first to use Auto Calibration."
+        )
+        self.auto_blocked_notice.setWordWrap(True)
+        self.auto_blocked_notice.setStyleSheet(
+            "background:#2a1800; color:#ffcc44; padding:8px;"
+            " border-radius:4px; border:1px solid #554400;"
+        )
+        self.auto_blocked_notice.setVisible(False)
+        auto_layout.addWidget(self.auto_blocked_notice)
 
         auto_explain = QLabel(
-            "Calibration identifies the best template and region for your current window size,\n"
-            "so scans run faster without checking every variant on every frame.\n"
-            "Auto Calibration covers both the Auction Options button and the Sold badge.\n"
-            "If no calibration exists the sniper still works, just a bit slower."
+            "Automatically detects the Auction Options button and best-fit sold badge template.\n"
+            "Open the auction house and wait until at least one row shows a car with the "
+            'yellow "Sold!" badge visible, then run calibration.'
         )
         auto_explain.setWordWrap(True)
-        auto_explain.setStyleSheet("font-style: italic;")
+        auto_explain.setStyleSheet("font-style:italic;")
         auto_layout.addWidget(auto_explain)
 
         self.auto_run_btn = QPushButton("Run Auto Calibration")
@@ -1290,13 +1373,32 @@ class CalibrationTab(QWidget):
         auto_layout.addWidget(self.auto_remove_btn)
 
         auto_layout.addStretch()
-        sub_tabs.addTab(auto_page, "Auto Calibration")
+        self.sub_tabs.addTab(auto_page, "Auto Calibration")
 
-        # ── Tab 1: Manual Calibration ─────────────────────────────────────
+        # Manual tab
         manual_page = QWidget()
         manual_layout = QVBoxLayout(manual_page)
         manual_layout.setContentsMargins(10, 10, 10, 10)
         manual_layout.setSpacing(6)
+
+        self.manual_blocked_notice = QLabel(
+            "Auto calibration is active. Remove it first to use Manual Calibration."
+        )
+        self.manual_blocked_notice.setWordWrap(True)
+        self.manual_blocked_notice.setStyleSheet(
+            "background:#2a1800; color:#ffcc44; padding:8px;"
+            " border-radius:4px; border:1px solid #554400;"
+        )
+        self.manual_blocked_notice.setVisible(False)
+        manual_layout.addWidget(self.manual_blocked_notice)
+
+        manual_explain = QLabel(
+            "Point to the auction button and sold badge with your mouse.\n"
+            "Use this if Auto Calibration doesn't detect correctly for your setup."
+        )
+        manual_explain.setWordWrap(True)
+        manual_explain.setStyleSheet("font-style:italic;")
+        manual_layout.addWidget(manual_explain)
 
         auction_row = QHBoxLayout()
         auction_row.setSpacing(8)
@@ -1338,34 +1440,12 @@ class CalibrationTab(QWidget):
         manual_layout.addWidget(self.manual_remove_btn)
 
         manual_layout.addStretch()
-        sub_tabs.addTab(manual_page, "Manual Calibration")
+        self.sub_tabs.addTab(manual_page, "Manual Calibration")
 
-        # ── Tab 2: Row Calibration ────────────────────────────────────────
-        row_page = QWidget()
-        row_layout = QVBoxLayout(row_page)
-        row_layout.setContentsMargins(10, 10, 10, 10)
+        s2_lay.addWidget(self.sub_tabs)
+        root.addWidget(step2)
 
-        row_explain = QLabel(
-            "Row regions define where each auction listing card is on screen.\n"
-            "If rows don't align after changing resolution or display scaling,\n"
-            "run the Row Tuner to adjust them interactively."
-        )
-        row_explain.setWordWrap(True)
-        row_explain.setStyleSheet("font-style: italic;")
-        row_layout.addWidget(row_explain)
-
-        self.tune_rows_btn = QPushButton("Run Row Tuner")
-        self.tune_rows_btn.setProperty("class", "accent-btn")
-        self.tune_rows_btn.setFixedWidth(160)
-        self.tune_rows_btn.clicked.connect(self._launch_row_tuner)
-        row_layout.addWidget(self.tune_rows_btn)
-
-        row_layout.addStretch()
-        sub_tabs.addTab(row_page, "Row Calibration")
-
-        root.addWidget(sub_tabs)
-
-        # ── Shared status box (always visible) ────────────────────────────
+        # ── Shared status box ─────────────────────────────────────────────
         status_box = QGroupBox("Calibration Status")
         status_layout = QVBoxLayout(status_box)
         self.status_label = QLabel("")
@@ -1384,7 +1464,7 @@ class CalibrationTab(QWidget):
         status_layout.addWidget(self.result_label)
         root.addWidget(status_box)
 
-        # ── Test / overlay buttons (always visible below status) ──────────
+        # ── Test / overlay buttons ────────────────────────────────────────
         test_row = QHBoxLayout()
 
         self.test_btn = QPushButton("Test Auction Button Region")
@@ -1422,6 +1502,7 @@ class CalibrationTab(QWidget):
 
         overlay = TuneOverlay()
         panel = ControlPanel(overlay)
+        panel.closed.connect(self._refresh_status)
         panel.show()
         self._row_tuner_panel = panel
 
@@ -1445,23 +1526,44 @@ class CalibrationTab(QWidget):
         ]
         ok = has_manual or has_auto
         self._status_changed.emit("\n".join(lines), ok)
+
+        # Row tuner status
+        row_path = window_utils.get_user_data_file("row_regions_tuned.json")
+        if os.path.isfile(row_path):
+            try:
+                with open(row_path) as f:
+                    data = json.load(f)
+                n = len(data.get("profiles", [data] if "rows" in data else []))
+                self.row_status_label.setText(f"✓ {n} profile(s) saved")
+                self.row_status_label.setStyleSheet("color:#4caf50; font-style:italic;")
+            except Exception:
+                self.row_status_label.setText("✓ Tuned file exists")
+                self.row_status_label.setStyleSheet("color:#4caf50; font-style:italic;")
+        else:
+            self.row_status_label.setText("Using formula defaults — open Row Tuner to calibrate")
+            self.row_status_label.setStyleSheet("color:#aaa; font-style:italic;")
+
+        # Tab mutual exclusion — show notice banners; tabs stay clickable so
+        # the user can reach the Remove button inside the blocked tab.
+        self.auto_blocked_notice.setVisible(has_manual)
+        self.manual_blocked_notice.setVisible(has_auto)
+
         self._set_calibration_buttons(not self._sniper_tab._calibration_in_progress)
 
     def _set_calibration_buttons(self, enabled: bool) -> None:
-        self.auto_run_btn.setEnabled(enabled)
-        self.manual_auction_btn.setEnabled(enabled)
-        self.manual_badge_btn.setEnabled(enabled)
-        self.auto_remove_btn.setEnabled(enabled and calibrator.has_auto_region())
-        self.manual_remove_btn.setEnabled(enabled and calibrator.has_manual_region())
-        self.test_btn.setEnabled(
-            enabled and (calibrator.has_manual_region() or calibrator.has_auto_region())
-        )
+        has_manual = calibrator.has_manual_region()
+        has_auto = calibrator.has_auto_region()
+        self.auto_run_btn.setEnabled(enabled and not has_manual)
+        self.auto_remove_btn.setEnabled(enabled and has_auto)
+        self.manual_auction_btn.setEnabled(enabled and not has_auto)
+        self.manual_badge_btn.setEnabled(enabled and not has_auto)
+        self.manual_remove_btn.setEnabled(enabled and has_manual)
+        self.test_btn.setEnabled(enabled and (has_manual or has_auto))
+        has_cal = has_manual or has_auto
         has_badge = window_utils.load_badge_params() is not None
-        self.test_badge_btn.setEnabled(enabled and has_badge)
-        self.overlay_btn.setEnabled(
-            enabled and (calibrator.has_manual_region() or calibrator.has_auto_region())
-        )
-        self.badge_overlay_btn.setEnabled(enabled)
+        self.test_badge_btn.setEnabled(enabled and has_badge and has_cal)
+        self.overlay_btn.setEnabled(enabled and has_cal)
+        self.badge_overlay_btn.setEnabled(enabled and has_cal)
         self._sniper_tab._set_calibration_mode(enabled)
 
     def _run_auto(self):
@@ -1828,9 +1930,7 @@ class CalibrationTab(QWidget):
 
             row_rects_phys = window_utils.get_row_regions(win)
 
-            badge_rects_phys = [
-                vision_utils.badge_scan_region(row, bp) for row in row_rects_phys
-            ]
+            badge_rects_phys = [vision_utils.badge_scan_region(row, bp) for row in row_rects_phys]
 
             self._badge_overlay = _BadgeRegionOverlay(
                 badge_rects_phys, row_rects_phys, duration_ms=4000
@@ -1866,9 +1966,10 @@ class SettingsTab(QWidget):
         root.addWidget(QLabel("<b style='font-size:14pt;'>Settings</b>"))
 
         explain = QLabel(
-            "Choose a timing preset based on your PC and connection speed, "
-            "or set custom values.\n"
-            "If keystrokes are too fast or slow, adjust the intervals."
+            "Choose a timing preset based on your PC and connection speed, or set custom values.\n"
+            "Start with Mid — it gives reliable detection for most setups. "
+            "Fast timing can cause available cars to be missed at high speed; "
+            "only use it on a high-end PC with a fast connection."
         )
         explain.setWordWrap(True)
         explain.setStyleSheet("font-style: italic;")
@@ -2173,6 +2274,178 @@ class InfoTab(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# Guide tab
+# ---------------------------------------------------------------------------
+
+
+class GuidesTab(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._build_ui()
+
+    def _build_ui(self):
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        container = QWidget()
+        root = QVBoxLayout(container)
+        root.setContentsMargins(20, 16, 20, 24)
+        root.setSpacing(6)
+
+        def _section(title: str) -> None:
+            if root.count():
+                root.addSpacing(10)
+            lbl = QLabel(f"<b style='font-size:13pt;'>{title}</b>")
+            root.addWidget(lbl)
+            sep = QFrame()
+            sep.setFrameShape(QFrame.Shape.HLine)
+            sep.setStyleSheet("QFrame { color: #555; }")
+            root.addWidget(sep)
+
+        def _para(text: str, color: str = "#ccc") -> None:
+            lbl = QLabel(text)
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet(f"font-size:10pt; color:{color}; padding-top:4px;")
+            lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            root.addWidget(lbl)
+
+        def _subhead(text: str) -> None:
+            lbl = QLabel(f"<b style='font-size:10pt; color:#aaddff;'>{text}</b>")
+            lbl.setStyleSheet("padding-top:8px;")
+            root.addWidget(lbl)
+
+        # ── Requirements ─────────────────────────────────────────────
+        _section("Requirements")
+        _para(
+            "• Windows 10 or 11\n"
+            "• Forza Horizon 6 installed and running\n"
+            '• The game must be set to English — the sniper reads the "Sold!" badge text '
+            "using OCR, other languages will not be detected\n"
+            "• Windowed or borderless windowed mode is recommended for calibration"
+        )
+
+        # ── Quick Start ───────────────────────────────────────────────
+        _section("Quick Start")
+        _para(
+            "1.  Launch FH6 and navigate to the Auction House.\n"
+            "2.  In this app, open the Calibration tab.\n"
+            "3.  Before running calibration, check that the row regions line up with the "
+            "auction cards on screen. Open the Row Tuner (Step 1) and adjust the rows — "
+            "they are likely out of alignment on first use or after a resolution change.\n"
+            "4.  Run Auto Calibration (Step 2) — make sure at least one row shows a car "
+            'with the yellow "Sold!" badge before clicking Run.\n'
+            "5.  Go to Settings and pick Mid as your starting timing preset.\n"
+            "6.  Return to the Sniper tab and hit Start."
+        )
+
+        # ── Calibration ───────────────────────────────────────────────
+        _section("Calibration")
+
+        _subhead("Row Calibration")
+        _para(
+            "The sniper watches 4 row regions for sold badges and available cars. "
+            "At different resolutions or display-scaling levels the formula estimate may not "
+            "line up perfectly with the actual cards.\n\n"
+            "Open the Row Tuner, select a row with the numbered buttons (or keys 1–4), "
+            "then use the right panel to move the row up/down/left/right and the left panel "
+            "to resize it until the coloured overlay box sits on the auction card. "
+            "Use Copy to all rows once the first row is correct, then fine-tune the rest. "
+            "Hit Save — profiles are stored per resolution so rows stay correct after "
+            "resolution changes."
+        )
+
+        _subhead("Auto Calibration (recommended)")
+        _para(
+            "Automatically finds the Auction Options button and picks the best sold-badge "
+            "template for your screen.\n\n"
+            "How to use:\n"
+            "  1. Open the Auction House in FH6.\n"
+            '  2. Wait until at least one row shows a car with the yellow "Sold!" badge.\n'
+            "  3. Click Run Auto Calibration.\n\n"
+            "If it fails, make sure the game is fully visible (not covered by other windows) "
+            "and retry. Windowed mode works best."
+        )
+
+        _subhead("Manual Calibration")
+        _para(
+            "Use this if Auto Calibration cannot find the button, or if you have an unusual "
+            "window layout.\n\n"
+            "Both the auction button and sold badge use the same method: hover your mouse "
+            "over the top-left corner when prompted, wait for the countdown, then move to "
+            "the bottom-right corner and wait again. Just follow the on-screen countdown "
+            "and hold still at each corner.\n\n"
+            "Tip: the in-game overlay (toggle in the Sniper tab) has Calib Auction and "
+            "Calib Badge buttons so you can calibrate without alt-tabbing."
+        )
+
+        # ── Settings ──────────────────────────────────────────────────
+        _section("Settings")
+
+        _subhead("Timing Presets")
+        _para(
+            "Timing controls how fast keystrokes are sent during buy attempts and auction resets.\n\n"
+            "Mid  —  recommended starting point. Reliable detection for most setups.\n"
+            "Fast  —  aggressive timing; may cause available cars to be missed at high speed. "
+            "Only try this once Mid is working well and you want more speed.\n"
+            "Slow  —  for slower PCs or laggy connections.\n\n"
+            "If available cars are being missed, switch to Mid or Slow and re-run calibration."
+        )
+
+        _subhead("Number of Scans")
+        _para(
+            "How many auction listings the sniper will scan before stopping automatically. "
+            "Set this high (or leave at the default) for a long session, or low for a quick "
+            "targeted run."
+        )
+
+        _subhead("Buyout Target")
+        _para(
+            "How many successful car purchases to make before the sniper stops automatically. "
+            "Set to Infinite to keep running until you stop it manually or the Number of Scans "
+            "is reached, or pick a specific number if you only want to buy a fixed amount of cars."
+        )
+
+        # ── Buyout Attempt Detection ──────────────────────────────────
+        _section("Buyout Attempt Detection")
+        _para(
+            "After each buyout attempt the sniper waits and tries to detect whether the "
+            "purchase succeeded or failed. This detection step has a short built-in delay "
+            "to account for slower internet connections and laggy servers — the game needs "
+            "a moment to confirm the transaction before the result can be read.\n\n"
+            "If you are on a slower connection and buyouts are being logged as failed even "
+            "when they succeed, try increasing the Post Buy Wait value in Settings."
+        )
+
+        # ── In-game Overlay ───────────────────────────────────────────
+        _section("In-game Overlay")
+        _para(
+            "Toggle the overlay from the Sniper tab. It floats above the FH6 window and lets "
+            "you start/stop the sniper, trigger calibration, and open the Row Tuner "
+            "without alt-tabbing.\n\n"
+            "The overlay auto-hides when FH6 loses focus and reappears when it's active again. "
+            "Click Hide or uncheck the toggle to close it permanently."
+        )
+
+        # ── Tips ──────────────────────────────────────────────────────
+        _section("Tips & Troubleshooting")
+        _para(
+            "• Recalibrate after resizing, moving, or switching FH6 between windowed and "
+            "fullscreen — the button position changes.\n"
+            "• Only one calibration type (Auto or Manual) can be active at a time. "
+            "Remove the current one before switching.\n"
+            "• If the sniper stops detecting after a game update, re-run Auto Calibration.\n"
+            "• Config is saved at  %APPDATA%\\FH6Sniper\\config.json\n"
+            "• Logs are shown in the Status Log panel on the Sniper tab."
+        )
+
+        root.addStretch()
+        scroll.setWidget(container)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+
+
+# ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
 
@@ -2194,6 +2467,7 @@ class MainWindow(QMainWindow):
         calib_tab = CalibrationTab(sniper_tab)
         sniper_tab._calib_tab = calib_tab
         settings_tab = SettingsTab(sniper_tab)
+        guides_tab = GuidesTab()
         info_tab = InfoTab()
 
         central = QWidget()
@@ -2203,7 +2477,7 @@ class MainWindow(QMainWindow):
 
         nav = QListWidget()
         nav.setFixedWidth(130)
-        nav.addItems(["Sniper", "Calibration", "Settings", "Info"])
+        nav.addItems(["Sniper", "Calibration", "Settings", "Guide", "Info"])
         nav.setStyleSheet(
             "QListWidget {"
             "    background-color: #1a1a2e;"
@@ -2232,6 +2506,7 @@ class MainWindow(QMainWindow):
         stack.addWidget(sniper_tab)
         stack.addWidget(calib_tab)
         stack.addWidget(settings_tab)
+        stack.addWidget(guides_tab)
         stack.addWidget(info_tab)
 
         nav.currentRowChanged.connect(stack.setCurrentIndex)
