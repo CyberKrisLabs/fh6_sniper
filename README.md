@@ -8,6 +8,8 @@ Automated auction house sniper for Forza Horizon 6. Continuously scans for avail
 
 **Requirements:** Python 3.10+, Windows 10/11, Forza Horizon 6
 
+> **The game must be set to English language.** The sniper reads the "Sold!" badge text using OCR — other languages will not be detected correctly.
+
 ```bash
 pip install -r requirements.txt
 python app.py
@@ -38,7 +40,7 @@ Every keystroke is gated behind a focus check — if FH6 loses focus, the sniper
 | Focus Safety | Stops sending keystrokes the moment FH6 is no longer the active window |
 | In-game Overlay | Frameless always-on-top HUD showing live stats without alt-tabbing |
 | Live Stats | Tracks buy attempts, successes, failures, and refreshes in real time |
-| Color-coded Log | GUI log with emoji markers; everything also written to `sniper.log` |
+| Color-coded Log | GUI log with emoji markers for quick status scanning |
 | Standalone EXE | Packages into a single executable with PyInstaller |
 
 ---
@@ -116,9 +118,9 @@ Vision tests monkeypatch `pyautogui.screenshot` to simulate the screen, so FH6 d
 | Auto calibration fails | Make sure the Auction House is open and visible, then retry |
 | False positives / misfires | Increase timing intervals in the Settings tab |
 
-**Config and log locations** (useful for debugging):
+**Config location** (useful for debugging):
 - Config: `%APPDATA%\FH6Sniper\config.json`
-- Log: `sniper.log` in the same folder as the exe
+- Logs: shown in the Status Log panel inside the app
 
 ---
 

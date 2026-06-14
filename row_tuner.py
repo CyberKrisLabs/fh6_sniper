@@ -19,10 +19,11 @@ import json
 import signal
 import sys
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -60,13 +61,33 @@ def _dpr() -> float:
     return QApplication.primaryScreen().devicePixelRatio()
 
 
+_STD_HEIGHTS = [480, 600, 720, 768, 800, 900, 1080, 1200, 1440, 1600, 1800, 2160]
+# Game logical width at which FH6 auction cards transition from minimum-size
+# to proportional scaling.  Empirically: at ~1024 logical the cards are ~1.55×
+# wider than ROW_WIDTH_PCT predicts; they scale proportionally above ~1600.
+_ROW_CARD_PIVOT_W = 1600.0
+
+
 def _base_rows(win_x: int, win_y: int, win_w: int, win_h: int) -> list[tuple[int, int, int, int]]:
+    # All coordinates in Qt logical pixels (physical ÷ DPR) for the overlay widget.
     dpr = _dpr()
-    x = int(win_x / dpr + (win_w / dpr) * ROW_X_PCT)
-    w = int(win_w * ROW_WIDTH_PCT)
-    h = int(win_h * ROW_HEIGHT_PCT)
-    y0 = win_y + int(win_h * ROW_Y_START_PCT)
-    step = int(win_h * ROW_STEP_PCT)
+    game_w_log = win_w / dpr
+    game_h_log = win_h / dpr
+
+    # Snap to nearest standard resolution height to separate game content from
+    # OS window chrome (title bar + borders).  The gap is the chrome height.
+    content_h = max((h for h in _STD_HEIGHTS if h <= game_h_log), default=int(game_h_log))
+    title_h = int(game_h_log) - content_h
+
+    # FH6 auction cards hit a minimum width at small game resolutions and stop
+    # shrinking proportionally.  Scale up below the pivot to compensate.
+    card_scale = max(1.0, _ROW_CARD_PIVOT_W / max(game_w_log, 1))
+
+    x = int(win_x / dpr + game_w_log * ROW_X_PCT)
+    y0 = int(win_y / dpr + title_h + content_h * ROW_Y_START_PCT)
+    w = int(game_w_log * ROW_WIDTH_PCT * card_scale)
+    h = int(content_h * ROW_HEIGHT_PCT * card_scale)
+    step = int(content_h * ROW_STEP_PCT * card_scale)
     return [(x, y0 + i * step, w, h) for i in range(NUM_ROWS)]
 
 
@@ -149,9 +170,7 @@ class TuneOverlay(QWidget):
             painter.drawText(rx + 6, ry + 20, label)
 
             if self._badge:
-                bx, by, bw, bh = vision_utils.badge_scan_region(
-                    (rx, ry, rw, rh), self._badge
-                )
+                bx, by, bw, bh = vision_utils.badge_scan_region((rx, ry, rw, rh), self._badge)
                 bp = QPen(BADGE_COLOR)
                 bp.setWidth(2)
                 bp.setStyle(Qt.PenStyle.DashLine)
@@ -168,6 +187,8 @@ class TuneOverlay(QWidget):
 
 
 class ControlPanel(QWidget):
+    closed = Signal()
+
     def __init__(self, overlay: TuneOverlay) -> None:
         super().__init__(None, Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setWindowTitle("Row Fine-Tuning")
@@ -192,118 +213,202 @@ class ControlPanel(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setSpacing(5)
+        root.setSpacing(8)
+        root.setContentsMargins(12, 10, 12, 10)
 
+        # ── Window info ───────────────────────────────────────────────
         self.win_label = QLabel("FH6: detecting...")
-        self.win_label.setStyleSheet("font-family: Consolas; font-size: 9pt;")
+        self.win_label.setStyleSheet("font-family: Consolas; font-size: 9pt; color: #999;")
         root.addWidget(self.win_label)
 
-        sel_box = QGroupBox("Selected row  (keys 1-4)")
-        sel_row = QHBoxLayout(sel_box)
-        sel_row.setContentsMargins(4, 4, 4, 4)
-        sel_row.setSpacing(4)
+        # ── Row selector ──────────────────────────────────────────────
+        sel_box = QGroupBox("Select Row  (keys 1 – 4)")
+        sel_layout = QHBoxLayout(sel_box)
+        sel_layout.setContentsMargins(6, 4, 6, 6)
+        sel_layout.setSpacing(6)
         self._sel_btns: list[QPushButton] = []
         for i in range(NUM_ROWS):
             c = ROW_COLORS[i]
             hex_c = f"#{c.red():02x}{c.green():02x}{c.blue():02x}"
             btn = QPushButton(f"Row {i + 1}")
-            btn.setFixedWidth(70)
-            btn.setStyleSheet(
-                f"QPushButton {{ border: 2px solid {hex_c}; border-radius: 4px; }}"
-                f"QPushButton:checked {{ background: {hex_c}; color: #111; font-weight: bold; }}"
-            )
             btn.setCheckable(True)
+            btn.setFixedHeight(34)
+            btn.setStyleSheet(
+                f"QPushButton {{ border: 2px solid {hex_c}; border-radius: 5px;"
+                f" padding: 2px 10px; font-weight: bold; }}"
+                f"QPushButton:checked {{ background: {hex_c}; color: #111; }}"
+                f"QPushButton:hover:!checked {{"
+                f" background: rgba({c.red()},{c.green()},{c.blue()},60); }}"
+            )
             btn.clicked.connect(lambda _, idx=i: self._select(idx))
-            sel_row.addWidget(btn)
+            sel_layout.addWidget(btn)
             self._sel_btns.append(btn)
-        sel_row.addStretch()
+        sel_layout.addStretch()
         root.addWidget(sel_box)
 
-        self.row_info = QLabel("Row: -")
-        self.row_info.setStyleSheet("font-family: Consolas; font-size: 9pt;")
+        # ── Row info ──────────────────────────────────────────────────
+        self.row_info = QLabel("—")
+        self.row_info.setStyleSheet("font-family: Consolas; font-size: 8pt; color: #888;")
         self.row_info.setWordWrap(True)
         root.addWidget(self.row_info)
 
-        sep = QLabel()
-        sep.setFixedHeight(1)
-        sep.setStyleSheet("background: #555;")
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("QFrame { color: #444; }")
         root.addWidget(sep)
 
-        root.addWidget(
-            self._nudge_group(
-                "X  (<- ->  or  Shift+<- -> arrows - move/resize width)",
-                [("<<  10", -10), ("< 1", -1), ("1 >", 1), ("10 >>", 10)],
-                lambda d: self._adj(dx=d),
-            )
-        )
-        root.addWidget(
-            self._nudge_group(
-                "Y  (up/down arrows - move)",
-                [("^^ 10", -10), ("^ 1", -1), ("1 v", 1), ("10 vv", 10)],
-                lambda d: self._adj(dy=d),
-            )
-        )
-        root.addWidget(
-            self._nudge_group(
-                "Width  (Shift+<- ->)",
-                [("<<  10", -10), ("< 1", -1), ("1 >", 1), ("10 >>", 10)],
-                lambda d: self._adj(dw=d),
-            )
-        )
-        root.addWidget(
-            self._nudge_group(
-                "Height  (Shift+up/down)",
-                [("^^ 10", -10), ("^ 1", -1), ("1 v", 1), ("10 vv", 10)],
-                lambda d: self._adj(dh=d),
-            )
-        )
+        # ── Button factory helpers ────────────────────────────────────
 
-        sep2 = QLabel()
-        sep2.setFixedHeight(1)
-        sep2.setStyleSheet("background: #555;")
-        root.addWidget(sep2)
+        def _resize_btn(label: str, delta: int, fn) -> QPushButton:
+            btn = QPushButton(label)
+            btn.setFixedHeight(34)
+            if delta < 0:
+                btn.setStyleSheet(
+                    "QPushButton { background:#7a2828; color:#ffaaaa; border-radius:4px;"
+                    " font-weight:bold; font-size:10pt; }"
+                    "QPushButton:hover { background:#9a3838; }"
+                    "QPushButton:pressed { background:#521818; }"
+                )
+            else:
+                btn.setStyleSheet(
+                    "QPushButton { background:#2a5e38; color:#aaffaa; border-radius:4px;"
+                    " font-weight:bold; font-size:10pt; }"
+                    "QPushButton:hover { background:#3a7a4a; }"
+                    "QPushButton:pressed { background:#1a3e28; }"
+                )
+            btn.clicked.connect(lambda _, d=delta: fn(d))
+            return btn
 
-        btn_row = QHBoxLayout()
+        def _pos_btn(label: str, delta: int, axis: str) -> QPushButton:
+            btn = QPushButton(label)
+            btn.setFixedHeight(34)
+            btn.setStyleSheet(
+                "QPushButton { background:#4a3a78; color:#ccbbff; border-radius:4px;"
+                " font-weight:bold; font-size:10pt; }"
+                "QPushButton:hover { background:#6a5a9a; }"
+                "QPushButton:pressed { background:#2a1a58; }"
+            )
+            if axis == "y":
+                btn.clicked.connect(lambda _, d=delta: self._adj(dy=d))
+            else:
+                btn.clicked.connect(lambda _, d=delta: self._adj(dx=d))
+            return btn
 
-        self.reset_row_btn = QPushButton("Reset row")
+        # ── Two-column controls ───────────────────────────────────────
+        cols = QHBoxLayout()
+        cols.setSpacing(10)
+
+        # LEFT: Resize
+        resize_box = QGroupBox("Resize")
+        resize_box.setStyleSheet(
+            "QGroupBox { font-weight:bold; font-size:10pt; color:#7aa7e8;"
+            " border:1px solid #7aa7e8; border-radius:5px;"
+            " margin-top:10px; padding-top:4px; }"
+            "QGroupBox::title { subcontrol-origin:margin; left:8px; }"
+        )
+        resize_vlay = QVBoxLayout(resize_box)
+        resize_vlay.setSpacing(6)
+
+        w_lbl = QLabel("Width")
+        w_lbl.setStyleSheet("font-size:9pt; color:#bbb;")
+        resize_vlay.addWidget(w_lbl)
+        w_row = QHBoxLayout()
+        w_row.setSpacing(4)
+        for lbl, d in [("─ 10", -10), ("─ 1", -1), ("+ 1", 1), ("+ 10", 10)]:
+            w_row.addWidget(_resize_btn(lbl, d, lambda d: self._adj(dw=d)))
+        resize_vlay.addLayout(w_row)
+
+        h_lbl = QLabel("Height")
+        h_lbl.setStyleSheet("font-size:9pt; color:#bbb;")
+        resize_vlay.addWidget(h_lbl)
+        h_row = QHBoxLayout()
+        h_row.setSpacing(4)
+        for lbl, d in [("─ 10", -10), ("─ 1", -1), ("+ 1", 1), ("+ 10", 10)]:
+            h_row.addWidget(_resize_btn(lbl, d, lambda d: self._adj(dh=d)))
+        resize_vlay.addLayout(h_row)
+
+        cols.addWidget(resize_box)
+
+        # RIGHT: Position
+        pos_box = QGroupBox("Position")
+        pos_box.setStyleSheet(
+            "QGroupBox { font-weight:bold; font-size:10pt; color:#e8a87a;"
+            " border:1px solid #e8a87a; border-radius:5px;"
+            " margin-top:10px; padding-top:4px; }"
+            "QGroupBox::title { subcontrol-origin:margin; left:8px; }"
+        )
+        pos_vlay = QVBoxLayout(pos_box)
+        pos_vlay.setSpacing(6)
+
+        y_lbl = QLabel("Move Up / Down")
+        y_lbl.setStyleSheet("font-size:9pt; color:#bbb;")
+        pos_vlay.addWidget(y_lbl)
+        y_row = QHBoxLayout()
+        y_row.setSpacing(4)
+        for lbl, d in [("▲ 10", -10), ("▲ 1", -1), ("▼ 1", 1), ("▼ 10", 10)]:
+            y_row.addWidget(_pos_btn(lbl, d, "y"))
+        pos_vlay.addLayout(y_row)
+
+        x_lbl = QLabel("Move Left / Right")
+        x_lbl.setStyleSheet("font-size:9pt; color:#bbb;")
+        pos_vlay.addWidget(x_lbl)
+        x_row = QHBoxLayout()
+        x_row.setSpacing(4)
+        for lbl, d in [("◄ 10", -10), ("◄ 1", -1), ("1 ►", 1), ("10 ►", 10)]:
+            x_row.addWidget(_pos_btn(lbl, d, "x"))
+        pos_vlay.addLayout(x_row)
+
+        cols.addWidget(pos_box)
+        root.addLayout(cols)
+
+        # ── Secondary actions ─────────────────────────────────────────
+        sec_sep = QFrame()
+        sec_sep.setFrameShape(QFrame.Shape.HLine)
+        sec_sep.setStyleSheet("QFrame { color: #444; }")
+        root.addWidget(sec_sep)
+
+        sec_row = QHBoxLayout()
+        self.reset_row_btn = QPushButton("Reset this row")
         self.reset_row_btn.setToolTip("Reset selected row to formula defaults")
+        self.reset_row_btn.setStyleSheet(
+            "QPushButton { background:#3a3a3a; border-radius:4px; padding:4px 10px; }"
+            "QPushButton:hover { background:#4a4a4a; }"
+        )
         self.reset_row_btn.clicked.connect(self._reset_row)
-        btn_row.addWidget(self.reset_row_btn)
 
-        self.copy_btn = QPushButton("Copy to all")
-        self.copy_btn.setToolTip("Apply selected row adjustments to every row")
+        self.copy_btn = QPushButton("Copy to all rows")
+        self.copy_btn.setToolTip("Apply selected row's adjustments to all rows")
+        self.copy_btn.setStyleSheet(
+            "QPushButton { background:#3a3a3a; border-radius:4px; padding:4px 10px; }"
+            "QPushButton:hover { background:#4a4a4a; }"
+        )
         self.copy_btn.clicked.connect(self._copy_to_all)
-        btn_row.addWidget(self.copy_btn)
 
-        root.addLayout(btn_row)
+        sec_row.addWidget(self.reset_row_btn)
+        sec_row.addWidget(self.copy_btn)
+        sec_row.addStretch()
+        root.addLayout(sec_row)
 
-        self.save_btn = QPushButton("Save all rows")
-        self.save_btn.setFixedHeight(34)
-        self.save_btn.setStyleSheet("font-weight: bold;")
+        # ── Save ──────────────────────────────────────────────────────
+        self.save_btn = QPushButton("Save All Rows")
+        self.save_btn.setFixedHeight(42)
+        self.save_btn.setStyleSheet(
+            "QPushButton { background:#1e7a4a; color:white; font-size:12pt; font-weight:bold;"
+            " border-radius:6px; border:1px solid #2a9a5a; }"
+            "QPushButton:hover { background:#2a9a5a; }"
+            "QPushButton:pressed { background:#145a34; }"
+        )
         self.save_btn.clicked.connect(self._save)
         root.addWidget(self.save_btn)
 
+        # ── Status ────────────────────────────────────────────────────
         self.status_label = QLabel("")
-        self.status_label.setStyleSheet("font-size: 9pt; color: #8f8;")
+        self.status_label.setStyleSheet("font-size:9pt; color:#8f8;")
         self.status_label.setWordWrap(True)
         root.addWidget(self.status_label)
 
-        self.setFixedWidth(440)
+        self.setFixedWidth(520)
         self._select(0)
-
-    def _nudge_group(self, title: str, steps: list, fn) -> QGroupBox:
-        box = QGroupBox(title)
-        box.setStyleSheet("QGroupBox { font-size: 9pt; }")
-        row = QHBoxLayout(box)
-        row.setContentsMargins(4, 2, 4, 4)
-        row.setSpacing(4)
-        for label, delta in steps:
-            btn = QPushButton(label)
-            btn.setFixedWidth(68)
-            btn.clicked.connect(lambda _, d=delta: fn(d))
-            row.addWidget(btn)
-        row.addStretch()
-        return box
 
     def _select(self, idx: int) -> None:
         self._sel = idx
@@ -377,14 +482,16 @@ class ControlPanel(QWidget):
 
         if hasattr(self, "_pending_tuned") and self._win_phys:
             wx, wy, ww, wh = self._win_phys
+            ww_log = ww / dpr
+            wh_log = wh / dpr
             rows_to_apply = _load_tuned(ww, wh)
             if rows_to_apply:
                 for i, row_pct in enumerate(rows_to_apply[:NUM_ROWS]):
                     bx, by, bw, bh = self._base[i]
-                    tx = int(wx / dpr + (ww / dpr) * row_pct["x_pct"])
-                    ty = wy + int(wh * row_pct["y_pct"])
-                    tw = int(ww * row_pct["w_pct"])
-                    th = int(wh * row_pct["h_pct"])
+                    tx = int(wx / dpr + ww_log * row_pct["x_pct"])
+                    ty = int(wy / dpr + wh_log * row_pct["y_pct"])
+                    tw = int(ww_log * row_pct["w_pct"])
+                    th = int(wh_log * row_pct["h_pct"])
                     self._adjs[i] = [tx - bx, ty - by, tw - bw, th - bh]
             del self._pending_tuned
 
@@ -396,10 +503,12 @@ class ControlPanel(QWidget):
             bx, by, bw, bh = self._base[self._sel]
             wx, wy, ww, wh = self._win_phys
             dx, dy, dw, dh = self._adjs[self._sel]
-            x_pct = (rx - wx / dpr) / (ww / dpr) if ww else 0
-            y_pct = (ry - wy) / wh if wh else 0
-            w_pct = rw / ww if ww else 0
-            h_pct = rh / wh if wh else 0
+            ww_log = ww / dpr
+            wh_log = wh / dpr
+            x_pct = (rx - wx / dpr) / ww_log if ww_log else 0
+            y_pct = (ry - wy / dpr) / wh_log if wh_log else 0
+            w_pct = rw / ww_log if ww_log else 0
+            h_pct = rh / wh_log if wh_log else 0
             self.row_info.setText(
                 f"Row {self._sel + 1}:  ({rx},{ry})  {rw}x{rh} px\n"
                 f"  adj: dx={dx:+d} dy={dy:+d} dw={dw:+d} dh={dh:+d}\n"
@@ -414,15 +523,17 @@ class ControlPanel(QWidget):
 
         wx, wy, ww, wh = self._win_phys
         dpr = _dpr()
+        ww_log = ww / dpr
+        wh_log = wh / dpr
         rows = self._current_rows()
         row_data = []
         for rx, ry, rw, rh in rows:
             row_data.append(
                 {
-                    "x_pct": round((rx - wx / dpr) / (ww / dpr), 4) if ww else 0,
-                    "y_pct": round((ry - wy) / wh, 4) if wh else 0,
-                    "w_pct": round(rw / ww, 4) if ww else 0,
-                    "h_pct": round(rh / wh, 4) if wh else 0,
+                    "x_pct": round((rx - wx / dpr) / ww_log, 4) if ww_log else 0,
+                    "y_pct": round((ry - wy / dpr) / wh_log, 4) if wh_log else 0,
+                    "w_pct": round(rw / ww_log, 4) if ww_log else 0,
+                    "h_pct": round(rh / wh_log, 4) if wh_log else 0,
                 }
             )
 
@@ -493,6 +604,7 @@ class ControlPanel(QWidget):
     def closeEvent(self, event) -> None:
         self._overlay.close()
         super().closeEvent(event)
+        self.closed.emit()
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

@@ -256,18 +256,27 @@ def get_row_regions(win, num_rows: int = 4) -> list[tuple[int, int, int, int]]:
     tuned = get_tuned_row_regions(win, num_rows)
     if tuned:
         return tuned
-    dpr = _get_display_dpr()
     wx, wy, ww, wh = win.left, win.top, win.width, win.height
-    # Compute in Qt logical space then scale to physical (mirrors test_detection.py)
-    x_log = int(wx / dpr + (ww / dpr) * ROW_X_PCT)
-    w_log = int(ww * ROW_WIDTH_PCT)
-    h_log = int(wh * ROW_HEIGHT_PCT)
-    y0_log = wy + int(wh * ROW_Y_START_PCT)
-    step_log = int(wh * ROW_STEP_PCT)
-    return [
-        (int(x_log * dpr), int((y0_log + i * step_log) * dpr), int(w_log * dpr), int(h_log * dpr))
-        for i in range(num_rows)
-    ]
+    dpr = _get_display_dpr()
+    game_w_log = ww / dpr
+
+    # Snap window height to nearest standard game resolution height so that the
+    # OS window chrome (title bar + borders) is excluded from the row geometry.
+    _STD_H = [480, 600, 720, 768, 800, 900, 1080, 1200, 1440, 1600, 1800, 2160]
+    game_h_log = wh / dpr
+    content_h_log = max((h for h in _STD_H if h <= game_h_log), default=int(game_h_log))
+    content_h_phys = int(content_h_log * dpr)
+    title_h_phys = wh - content_h_phys
+
+    # FH6 auction cards stop shrinking below ~1600 logical game width.
+    card_scale = max(1.0, 1600.0 / max(game_w_log, 1))
+
+    x = int(wx + ww * ROW_X_PCT)
+    y0 = int(wy + title_h_phys + content_h_phys * ROW_Y_START_PCT)
+    w = int(ww * ROW_WIDTH_PCT * card_scale)
+    h = int(content_h_phys * ROW_HEIGHT_PCT * card_scale)
+    step = int(content_h_phys * ROW_STEP_PCT * card_scale)
+    return [(x, y0 + i * step, w, h) for i in range(num_rows)]
 
 
 def best_matching_row_profile(
@@ -337,13 +346,14 @@ def get_tuned_row_regions(win, num_rows: int = 4) -> list[tuple[int, int, int, i
         wx, wy, ww, wh = win.left, win.top, win.width, win.height
         result = []
         for r in rows_pct[:num_rows]:
-            # Qt logical rect (same formula as tune_rows._base_rows)
-            x_log = int(wx / dpr + (ww / dpr) * r["x_pct"])
-            y_log = wy + int(wh * r["y_pct"])
-            w_log = int(ww * r["w_pct"])
-            h_log = int(wh * r["h_pct"])
-            # Scale to physical pyautogui coordinates
-            result.append((int(x_log * dpr), int(y_log * dpr), int(w_log * dpr), int(h_log * dpr)))
+            # Percentages are physical fractions; pygetwindow and pyautogui both
+            # use physical pixels so no DPR conversion is needed here.
+            result.append((
+                int(wx + ww * r["x_pct"]),
+                int(wy + wh * r["y_pct"]),
+                int(ww * r["w_pct"]),
+                int(wh * r["h_pct"]),
+            ))
         return result
     except Exception as e:
         print(f"⚠️  get_tuned_row_regions: {e}")
