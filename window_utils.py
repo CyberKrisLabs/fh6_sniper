@@ -257,12 +257,25 @@ def get_row_regions(win, num_rows: int = 4) -> list[tuple[int, int, int, int]]:
     if tuned:
         return tuned
     wx, wy, ww, wh = win.left, win.top, win.width, win.height
-    # pygetwindow and pyautogui both use physical pixels — apply percentages directly.
+    dpr = _get_display_dpr()
+    game_w_log = ww / dpr
+
+    # Snap window height to nearest standard game resolution height so that the
+    # OS window chrome (title bar + borders) is excluded from the row geometry.
+    _STD_H = [480, 600, 720, 768, 800, 900, 1080, 1200, 1440, 1600, 1800, 2160]
+    game_h_log = wh / dpr
+    content_h_log = max((h for h in _STD_H if h <= game_h_log), default=int(game_h_log))
+    content_h_phys = int(content_h_log * dpr)
+    title_h_phys = wh - content_h_phys
+
+    # FH6 auction cards stop shrinking below ~1600 logical game width.
+    card_scale = max(1.0, 1600.0 / max(game_w_log, 1))
+
     x = int(wx + ww * ROW_X_PCT)
-    y0 = int(wy + wh * ROW_Y_START_PCT)
-    w = int(ww * ROW_WIDTH_PCT)
-    h = int(wh * ROW_HEIGHT_PCT)
-    step = int(wh * ROW_STEP_PCT)
+    y0 = int(wy + title_h_phys + content_h_phys * ROW_Y_START_PCT)
+    w = int(ww * ROW_WIDTH_PCT * card_scale)
+    h = int(content_h_phys * ROW_HEIGHT_PCT * card_scale)
+    step = int(content_h_phys * ROW_STEP_PCT * card_scale)
     return [(x, y0 + i * step, w, h) for i in range(num_rows)]
 
 

@@ -60,14 +60,33 @@ def _dpr() -> float:
     return QApplication.primaryScreen().devicePixelRatio()
 
 
+_STD_HEIGHTS = [480, 600, 720, 768, 800, 900, 1080, 1200, 1440, 1600, 1800, 2160]
+# Game logical width at which FH6 auction cards transition from minimum-size
+# to proportional scaling.  Empirically: at ~1024 logical the cards are ~1.55×
+# wider than ROW_WIDTH_PCT predicts; they scale proportionally above ~1600.
+_ROW_CARD_PIVOT_W = 1600.0
+
+
 def _base_rows(win_x: int, win_y: int, win_w: int, win_h: int) -> list[tuple[int, int, int, int]]:
     # All coordinates in Qt logical pixels (physical ÷ DPR) for the overlay widget.
     dpr = _dpr()
-    x = int(win_x / dpr + (win_w / dpr) * ROW_X_PCT)
-    w = int((win_w / dpr) * ROW_WIDTH_PCT)
-    h = int((win_h / dpr) * ROW_HEIGHT_PCT)
-    y0 = int(win_y / dpr + (win_h / dpr) * ROW_Y_START_PCT)
-    step = int((win_h / dpr) * ROW_STEP_PCT)
+    game_w_log = win_w / dpr
+    game_h_log = win_h / dpr
+
+    # Snap to nearest standard resolution height to separate game content from
+    # OS window chrome (title bar + borders).  The gap is the chrome height.
+    content_h = max((h for h in _STD_HEIGHTS if h <= game_h_log), default=int(game_h_log))
+    title_h = int(game_h_log) - content_h
+
+    # FH6 auction cards hit a minimum width at small game resolutions and stop
+    # shrinking proportionally.  Scale up below the pivot to compensate.
+    card_scale = max(1.0, _ROW_CARD_PIVOT_W / max(game_w_log, 1))
+
+    x = int(win_x / dpr + game_w_log * ROW_X_PCT)
+    y0 = int(win_y / dpr + title_h + content_h * ROW_Y_START_PCT)
+    w = int(game_w_log * ROW_WIDTH_PCT * card_scale)
+    h = int(content_h * ROW_HEIGHT_PCT * card_scale)
+    step = int(content_h * ROW_STEP_PCT * card_scale)
     return [(x, y0 + i * step, w, h) for i in range(NUM_ROWS)]
 
 
