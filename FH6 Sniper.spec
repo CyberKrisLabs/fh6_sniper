@@ -1,12 +1,26 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os, site
+
+def _find_winrt_dll():
+    # Search all site-packages directories (handles both venv and global installs)
+    for sp in site.getsitepackages():
+        p = os.path.join(sp, "winrt", "msvcp140.dll")
+        if os.path.isfile(p):
+            return p
+    # Local .venv fallback (developer workstation)
+    fallback = os.path.join(".venv", "Lib", "site-packages", "winrt", "msvcp140.dll")
+    if os.path.isfile(fallback):
+        return fallback
+    return None
+
+_winrt_dll = _find_winrt_dll()
+_binaries = [(_winrt_dll, ".")] if _winrt_dll else []
+
 a = Analysis(
     ["app.py"],
     pathex=[],
-    binaries=[
-        # winrt ships its own msvcp140.dll — include it alongside the .pyd files
-        (".venv/Lib/site-packages/winrt/msvcp140.dll", "."),
-    ],
+    binaries=_binaries,
     datas=[
         ("assets", "assets"),
         ("docs", "docs"),
