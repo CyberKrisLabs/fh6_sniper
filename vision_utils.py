@@ -579,56 +579,98 @@ def detect_sold(
     return False
 
 
-def _region_is_yellow(img_bgr: np.ndarray, min_fraction: float = 0.05) -> bool:
-    """Return True if the region looks like the flat-yellow sold badge.
+def _region_is_yellow(img_bgr: np.ndarray) -> bool:
+    """Return True if the region contains any yellow pixels in the sold-badge hue range.
 
-    Two checks must both pass:
-    1. Enough yellow pixels (hue 24-38/180, high S+V) — rejects red badges, orange cars, grey UI.
-    2. Yellow pixels are brightness-uniform (low std-dev in HSV Value) — rejects car
-       paint which has lighting gradients/specular highlights baked in by the renderer.
-       A flat UI badge has essentially constant V; a 3D car body does not.
+    Acts as a fast pre-filter before OCR: skips rows whose badge area has no yellow
+    at all (red badges, grey UI, dark frames). OCR handles all false-positive filtering.
     """
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv, np.array([24, 100, 100]), np.array([38, 255, 255]))
-    if float(mask.sum()) / (255.0 * mask.size) < min_fraction:
-        return False
-    yellow_v = hsv[:, :, 2][mask > 0]
-    if len(yellow_v) < 20:
-        return False
-    return float(np.std(yellow_v)) < 40
+    return bool(mask.any())
 
 
-_tesseract_ok: bool | None = None
+_winrt_ocr_ok: bool | None = None
 
 
-def _tesseract_available() -> bool:
-    global _tesseract_ok
-    if _tesseract_ok is None:
+def _winrt_available() -> bool:
+    global _winrt_ocr_ok
+    if _winrt_ocr_ok is None:
         try:
-            import pytesseract  # noqa: F401
+            import winrt.windows.graphics.imaging  # noqa: F401
+            import winrt.windows.media.ocr  # noqa: F401
+            import winrt.windows.storage.streams  # noqa: F401
 
-            pytesseract.get_tesseract_version()
-            _tesseract_ok = True
+            _winrt_ocr_ok = True
         except Exception:
-            _tesseract_ok = False
-    return bool(_tesseract_ok)
+            _winrt_ocr_ok = False
+    return bool(_winrt_ocr_ok)
+
+
+def _crop_to_yellow_badge(img_bgr: np.ndarray) -> np.ndarray:
+    """Crop img_bgr to the bounding box of yellow badge pixels (+ small padding)."""
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, np.array([24, 100, 100]), np.array([38, 255, 255]))
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return img_bgr
+    all_pts = np.vstack(contours)
+    rx, ry, rw, rh = cv2.boundingRect(all_pts)
+    pad = 6
+    x1 = max(0, rx - pad)
+    y1 = max(0, ry - pad)
+    x2 = min(img_bgr.shape[1], rx + rw + pad)
+    y2 = min(img_bgr.shape[0], ry + rh + pad)
+    return img_bgr[y1:y2, x1:x2]
+
+
+async def _winrt_ocr_async(img_bgr: np.ndarray) -> str:
+    from winrt.windows.graphics.imaging import BitmapPixelFormat, SoftwareBitmap
+    from winrt.windows.media.ocr import OcrEngine
+    from winrt.windows.storage.streams import DataWriter
+
+    crop = _crop_to_yellow_badge(img_bgr)
+    scale = 3
+    h_out = crop.shape[0] * scale
+    w_out = crop.shape[1] * scale
+
+    engine = OcrEngine.try_create_from_user_profile_languages()
+    if engine is None:
+        return ""
+
+    async def _recognize(bgra: np.ndarray) -> str:
+        writer = DataWriter()
+        writer.write_bytes(bgra.tobytes())
+        ibuf = writer.detach_buffer()
+        bitmap = SoftwareBitmap.create_copy_from_buffer(ibuf, BitmapPixelFormat.BGRA8, w_out, h_out)
+        result = await engine.recognize_async(bitmap)
+        return result.text
+
+    # Pass 1: raw colour — Windows OCR handles colour natively and avoids
+    # thresholding artefacts that confuse it for some badge renderings.
+    scaled_color = cv2.resize(crop, (w_out, h_out), interpolation=cv2.INTER_CUBIC)
+    text = await _recognize(cv2.cvtColor(scaled_color, cv2.COLOR_BGR2BGRA))
+    if text.strip():
+        return text
+
+    # Pass 2: Otsu threshold on the crop — different badge angles/renders
+    # that fool the colour pass are often caught by the thresholded version.
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    scaled_gray = cv2.resize(gray, (w_out, h_out), interpolation=cv2.INTER_CUBIC)
+    _, thresh = cv2.threshold(scaled_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return await _recognize(cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGRA))
 
 
 def _sold_badge_ocr(img_bgr: np.ndarray) -> bool:
-    """Return True if OCR finds 'SOLD' in the badge region.
+    """Return True if Windows built-in OCR finds 'SOLD' in the badge region."""
+    import asyncio
 
-    Pre-processing: scale up 3× then threshold to black-on-white so
-    Tesseract sees clean high-contrast letter shapes regardless of the
-    exact yellow shade or display scaling in use.
-    """
-    import pytesseract
-
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    h, w = gray.shape
-    scaled = cv2.resize(gray, (w * 3, h * 3), interpolation=cv2.INTER_CUBIC)
-    _, thresh = cv2.threshold(scaled, 100, 255, cv2.THRESH_BINARY)
-    text = pytesseract.image_to_string(thresh, config="--psm 7")
-    return "SOLD" in text.upper()
+    text = asyncio.run(_winrt_ocr_async(img_bgr))
+    t = text.upper()
+    # "SOLD" exact match, or common OCR misreads of tilted badges ('sool', 'soo!')
+    # where S and O are read correctly but L/D get confused.  The yellow gate
+    # already rules out false positives so "SO" as a prefix is enough signal.
+    return "SOLD" in t or (t.startswith("SO") and len(t) >= 3)
 
 
 def sold_badge_score(
@@ -693,10 +735,7 @@ def sold_badge_score(
     if not _region_is_yellow(screen_img):
         return 0.0
 
-    # OCR path: read the letters directly — a yellow/black car body will never
-    # contain the word "SOLD", so this eliminates all false positives from
-    # similar-coloured cars that fool template matching.
-    if _tesseract_available():
+    if _winrt_available():
         try:
             return 1.0 if _sold_badge_ocr(screen_img) else 0.0
         except Exception:

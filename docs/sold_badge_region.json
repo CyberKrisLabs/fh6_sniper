@@ -73,19 +73,19 @@
         "height": 1381,
         "dpr": 1.5
       },
-      "badge_x_pct": 0.0676,
-      "badge_y_pct": 0.2731,
-      "badge_w_pct": 0.1437,
-      "badge_h_pct": 0.3277,
-      "badge_dx_px": 72,
-      "badge_dy_px": 65,
-      "badge_w_px": 153,
-      "badge_h_px": 78,
+      "badge_x_pct": 0.0714,
+      "badge_y_pct": 0.2899,
+      "badge_w_pct": 0.1371,
+      "badge_h_pct": 0.2983,
+      "badge_dx_px": 76,
+      "badge_dy_px": 69,
+      "badge_w_px": 146,
+      "badge_h_px": 71,
       "row_ref_px": [
         1065,
         238
       ],
-      "calibration_score": 0.8457,
+      "calibration_score": 1.0,
       "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
     },
     {

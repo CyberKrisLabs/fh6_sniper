@@ -278,12 +278,6 @@ def find_last_available_row(
                 if log:
                     log(f"  Row {idx + 1}: sold")
                 continue
-            if score < 0.10:
-                # Score this low means detection failed (transition frame, bad region, etc.)
-                # Default to sold so we never attempt a buy on a detection failure.
-                if log:
-                    log(f"  Row {idx + 1}: uncertain — skipping")
-                continue
             if log:
                 log(f"  Row {idx + 1}: available")
         else:

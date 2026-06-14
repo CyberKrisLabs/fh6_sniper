@@ -9,4 +9,8 @@ numpy
 pywin32
 requests
 pytest
-pytesseract
+winrt-runtime
+winrt-Windows.Foundation
+winrt-Windows.Media.Ocr
+winrt-Windows.Graphics.Imaging
+winrt-Windows.Storage.Streams

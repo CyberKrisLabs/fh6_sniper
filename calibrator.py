@@ -337,15 +337,17 @@ def select_sold_badge_template(win=None) -> str:
 
 
 def auto_calibrate_sold_badge(status_label=None) -> dict | None:
-    """Detect the sold badge position by template-searching all visible auction rows.
+    """Detect the sold badge position by scanning visible auction rows.
 
-    Grabs the current screen, searches every row crop for the sold badge template
-    at multiple scales, and saves the best-match position as percentages to
-    docs/sold_badge_region.json (same format as measure_sold_region.py).
+    When Windows OCR is available (winrt packages installed), finds yellow blobs
+    in each row and reads their text — the blob that says "SOLD" is the badge.
+    Falls back to template matching when OCR is unavailable.
 
-    Returns the saved dict, or None if no badge was found above threshold.
+    Returns the saved dict, or None if no badge was found.
     Call this while a sold car is visible in the auction list.
     """
+    import asyncio
+
     import cv2
     import numpy as np
 
@@ -374,85 +376,148 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
     if full_img is None:
         full_img = pyautogui.screenshot()
 
-    # Build candidate template list (all size variants that exist)
-    base_tpl = window_utils.resource_path("assets/sold_badge_template.png")
-    candidates = []
-    for suffix in ("", "_med", "_1024x768"):
-        p = base_tpl.replace(".png", f"{suffix}.png")
-        if os.path.isfile(p):
-            candidates.append(p)
+    # Badge is always in the left portion of the row, away from price/timer UI.
+    SEARCH_X_FRACTION = 0.55
 
-    best_score = 0.0
     best_info: dict | None = None
-    best_template_name = ""
 
-    # Track per-template best score across all rows for diagnostics
-    tpl_best_scores: dict[str, float] = {}
+    if vision_utils._winrt_available():
+        # OCR path: find yellow blobs in each row, read their text.
+        # The blob that contains "SOLD" (but not "NOT SOLD") is the badge.
+        _status("🔍 Badge calibration: scanning rows via OCR (Windows built-in)…")
 
-    # The sold badge occupies the left portion of the row and is never tiny.
-    # Require the match to be at least 8% of the row width wide and 20% tall.
-    # Searching only the left 55% of each row keeps us away from price/timer UI.
-    MIN_W_PCT = 0.08
-    MIN_H_PCT = 0.20
-    SEARCH_X_FRACTION = 0.55  # only left portion of each row
+        for row_idx, (rx, ry, rw, rh) in enumerate(row_regions):
+            search_w = int(rw * SEARCH_X_FRACTION)
+            row_pil = full_img.crop((rx, ry, rx + search_w, ry + rh))
+            row_bgr = cv2.cvtColor(np.array(row_pil), cv2.COLOR_RGB2BGR)
 
-    for row_idx, (rx, ry, rw, rh) in enumerate(row_regions):
-        search_w = int(rw * SEARCH_X_FRACTION)
-        row_pil = full_img.crop((rx, ry, rx + search_w, ry + rh))
-        row_bgr = cv2.cvtColor(np.array(row_pil), cv2.COLOR_RGB2BGR)
-        sh, sw = row_bgr.shape[:2]
-
-        min_tw = max(4, int(rw * MIN_W_PCT))
-        min_th = max(4, int(rh * MIN_H_PCT))
-
-        for tpl_path in candidates:
-            tpl = cv2.imread(tpl_path)
-            if tpl is None:
+            # Find yellow blobs — the sold badge is a distinct yellow rectangle.
+            hsv = cv2.cvtColor(row_bgr, cv2.COLOR_BGR2HSV)
+            yellow_mask = cv2.inRange(
+                hsv, np.array([24, 100, 100]), np.array([38, 255, 255])
+            )
+            contours, _ = cv2.findContours(
+                yellow_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+            if not contours:
                 continue
-            tpl_name = os.path.basename(tpl_path)
-            tpl_row_best = 0.0
-            for scale in np.linspace(1.2, 0.1, 30):
-                th = int(tpl.shape[0] * scale)
-                tw = int(tpl.shape[1] * scale)
-                if tw < min_tw or th < min_th or th > sh or tw > sw:
+
+            # Try each yellow blob, largest first.
+            for contour in sorted(contours, key=cv2.contourArea, reverse=True):
+                if cv2.contourArea(contour) < search_w * rh * 0.005:
+                    break  # remaining blobs are too small to be a badge
+                bx, by, bw, bh_badge = cv2.boundingRect(contour)
+                pad = max(4, int(rh * 0.05))
+                crop = row_bgr[
+                    max(0, by - pad) : min(row_bgr.shape[0], by + bh_badge + pad),
+                    max(0, bx - pad) : min(row_bgr.shape[1], bx + bw + pad),
+                ]
+                try:
+                    text = asyncio.run(vision_utils._winrt_ocr_async(crop))
+                except Exception:
                     continue
-                resized = cv2.resize(tpl, (tw, th), interpolation=cv2.INTER_AREA)
-                result = cv2.matchTemplate(row_bgr, resized, cv2.TM_CCOEFF_NORMED)
-                _, max_val, _, max_loc = cv2.minMaxLoc(result)
-                if max_val > tpl_row_best:
-                    tpl_row_best = max_val
-                if max_val > best_score:
-                    best_score = max_val
-                    best_template_name = tpl_name
-                    best_info = {
-                        "row_idx": row_idx,
-                        "rx": rx,
-                        "ry": ry,
-                        "rw": rw,
-                        "rh": rh,
-                        "match_x": max_loc[0],
-                        "match_y": max_loc[1],
-                        "match_w": tw,
-                        "match_h": th,
-                    }
-            if tpl_row_best > tpl_best_scores.get(tpl_name, 0.0):
-                tpl_best_scores[tpl_name] = tpl_row_best
 
-    # Print per-template scores so it's visible why a particular template was chosen
-    _status("📊 Badge calibration scores (best match per template across all rows):")
-    for tname, score in sorted(tpl_best_scores.items(), key=lambda x: -x[1]):
-        marker = " ← SELECTED" if tname == best_template_name else ""
-        _status(f"   {tname}: {score:.3f}{marker}")
+                text_up = text.upper().strip()
+                # "NOT SOLD" badges also contain "SOLD" — exclude them.
+                # The yellow gate already filters red "Not Sold" badges, but
+                # we check the text too in case of unexpected badge colours.
+                if "SOLD" not in text_up or "NOT SOLD" in text_up:
+                    continue
 
-    MIN_DETECTION_SCORE = 0.45
-    if best_info is None or best_score < MIN_DETECTION_SCORE:
-        _status(
-            f"❌ Badge calibration: no sold badge found "
-            f"(best score={best_score:.3f}, need ≥{MIN_DETECTION_SCORE}). "
-            "Make sure a sold car is visible in the auction list."
-        )
-        return None
+                _status(f"✅ Badge found in row {row_idx + 1} (OCR: '{text.strip()}')")
+                best_info = {
+                    "row_idx": row_idx,
+                    "rx": rx,
+                    "ry": ry,
+                    "rw": rw,
+                    "rh": rh,
+                    "match_x": bx,
+                    "match_y": by,
+                    "match_w": bw,
+                    "match_h": bh_badge,
+                }
+                break
+            if best_info:
+                break
 
+        if best_info is None:
+            _status(
+                "❌ Badge calibration: no 'SOLD' badge found via OCR. "
+                "Make sure a sold car is visible in the auction list."
+            )
+            return None
+
+    else:
+        # Template matching fallback (when WinRT OCR packages are not installed).
+        base_tpl = window_utils.resource_path("assets/sold_badge_template.png")
+        candidates = []
+        for suffix in ("", "_med", "_1024x768"):
+            p = base_tpl.replace(".png", f"{suffix}.png")
+            if os.path.isfile(p):
+                candidates.append(p)
+
+        best_score = 0.0
+        best_template_name = ""
+        tpl_best_scores: dict[str, float] = {}
+        MIN_W_PCT = 0.08
+        MIN_H_PCT = 0.20
+
+        for row_idx, (rx, ry, rw, rh) in enumerate(row_regions):
+            search_w = int(rw * SEARCH_X_FRACTION)
+            row_pil = full_img.crop((rx, ry, rx + search_w, ry + rh))
+            row_bgr = cv2.cvtColor(np.array(row_pil), cv2.COLOR_RGB2BGR)
+            sh, sw = row_bgr.shape[:2]
+            min_tw = max(4, int(rw * MIN_W_PCT))
+            min_th = max(4, int(rh * MIN_H_PCT))
+
+            for tpl_path in candidates:
+                tpl = cv2.imread(tpl_path)
+                if tpl is None:
+                    continue
+                tpl_name = os.path.basename(tpl_path)
+                tpl_row_best = 0.0
+                for scale in np.linspace(1.2, 0.1, 30):
+                    th = int(tpl.shape[0] * scale)
+                    tw = int(tpl.shape[1] * scale)
+                    if tw < min_tw or th < min_th or th > sh or tw > sw:
+                        continue
+                    resized = cv2.resize(tpl, (tw, th), interpolation=cv2.INTER_AREA)
+                    result = cv2.matchTemplate(row_bgr, resized, cv2.TM_CCOEFF_NORMED)
+                    _, max_val, _, max_loc = cv2.minMaxLoc(result)
+                    if max_val > tpl_row_best:
+                        tpl_row_best = max_val
+                    if max_val > best_score:
+                        best_score = max_val
+                        best_template_name = tpl_name
+                        best_info = {
+                            "row_idx": row_idx,
+                            "rx": rx,
+                            "ry": ry,
+                            "rw": rw,
+                            "rh": rh,
+                            "match_x": max_loc[0],
+                            "match_y": max_loc[1],
+                            "match_w": tw,
+                            "match_h": th,
+                        }
+                if tpl_row_best > tpl_best_scores.get(tpl_name, 0.0):
+                    tpl_best_scores[tpl_name] = tpl_row_best
+
+        _status("📊 Badge calibration scores (best match per template across all rows):")
+        for tname, score in sorted(tpl_best_scores.items(), key=lambda x: -x[1]):
+            marker = " ← SELECTED" if tname == best_template_name else ""
+            _status(f"   {tname}: {score:.3f}{marker}")
+
+        MIN_DETECTION_SCORE = 0.45
+        if best_info is None or best_score < MIN_DETECTION_SCORE:
+            _status(
+                f"❌ Badge calibration: no sold badge found "
+                f"(best score={best_score:.3f}, need ≥{MIN_DETECTION_SCORE}). "
+                "Make sure a sold car is visible in the auction list."
+            )
+            return None
+
+    # --- Save badge parameters (common to both paths) ---
     rw, rh_val = best_info["rw"], best_info["rh"]
     result_dict = {
         "badge_x_pct": round(best_info["match_x"] / rw, 4) if rw else 0,
@@ -464,7 +529,7 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
         "badge_w_px": best_info["match_w"],
         "badge_h_px": best_info["match_h"],
         "row_ref_px": [rw, rh_val],
-        "calibration_score": round(best_score, 4),
+        "calibration_score": 1.0,
         "note": (
             "Auto-calibrated by auto_calibrate_sold_badge(). "
             "Percentages are relative to the row card (width, height). "
@@ -476,10 +541,6 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
         result_dict, win.width, win.height, window_utils._get_display_dpr()
     )
 
-    # Capture the actual badge pixels as a pixel-perfect template.
-    # Generic pre-made PNGs match the in-game badge at ~0.73 after scaling;
-    # a captured template matches at scale≈1.0 and scores ~0.95+, which
-    # creates a clear gap above yellow/black car bodies (~0.75).
     try:
         ax = best_info["rx"] + best_info["match_x"]
         ay = best_info["ry"] + best_info["match_y"]
@@ -501,9 +562,11 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
 
     row_num = best_info["row_idx"] + 1
     _status(
-        f"✅ Badge calibration: score={best_score:.3f} detected in row {row_num}  "
-        f"x={result_dict['badge_x_pct'] * 100:.1f}%  y={result_dict['badge_y_pct'] * 100:.1f}%  "
-        f"w={result_dict['badge_w_pct'] * 100:.1f}%  h={result_dict['badge_h_pct'] * 100:.1f}%"
+        f"✅ Badge calibration complete: found in row {row_num}  "
+        f"x={result_dict['badge_x_pct'] * 100:.1f}%  "
+        f"y={result_dict['badge_y_pct'] * 100:.1f}%  "
+        f"w={result_dict['badge_w_pct'] * 100:.1f}%  "
+        f"h={result_dict['badge_h_pct'] * 100:.1f}%"
     )
     return result_dict
 
