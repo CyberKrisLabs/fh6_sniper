@@ -2248,7 +2248,7 @@ class InfoTab(QWidget):
                 return
             try:
                 resp = requests.get(
-                    "https://api.github.com/repos/CyberKrisLabs/forza-horizon-6-sniper/releases/latest",
+                    "https://api.github.com/repos/CyberKrisLabs/fh6_sniper/releases/latest",
                     timeout=4,
                 )
                 if resp.ok:
