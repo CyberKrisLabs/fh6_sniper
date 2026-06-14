@@ -40,9 +40,9 @@ DEFAULT_Y_PCT = 0.00
 DEFAULT_W_PCT = 0.15
 DEFAULT_H_PCT = 0.40
 
-ROW_COLOR = QColor(60, 210, 60, 200)    # green border = row 1
+ROW_COLOR = QColor(60, 210, 60, 200)  # green border = row 1
 BADGE_COLOR = QColor(255, 200, 40, 230)  # yellow = raw calibration box
-SCAN_COLOR = QColor(255, 140, 0, 230)    # orange = padded scan region the sniper uses
+SCAN_COLOR = QColor(255, 140, 0, 230)  # orange = padded scan region the sniper uses
 
 
 def load_saved_badge(win_w: int | None = None, win_h: int | None = None) -> dict | None:
@@ -123,7 +123,7 @@ class SoldRegionOverlay(QWidget):
             lc = QColor(BADGE_COLOR)
             lc.setAlpha(255)
             painter.setPen(lc)
-            painter.drawText(bx + 4, by + 32, 'calibration target')
+            painter.drawText(bx + 4, by + 32, "calibration target")
 
 
 # ── Control panel ─────────────────────────────────────────────────────────────
