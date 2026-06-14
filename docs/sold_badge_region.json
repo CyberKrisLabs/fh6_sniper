@@ -153,6 +153,28 @@
       ],
       "calibration_score": 0.8439,
       "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
+    },
+    {
+      "label": "3193x1840",
+      "window_ref_physical": {
+        "width": 3193,
+        "height": 1840,
+        "dpr": 1.5
+      },
+      "badge_x_pct": 0.0698,
+      "badge_y_pct": 0.2476,
+      "badge_w_pct": 0.1375,
+      "badge_h_pct": 0.3048,
+      "badge_dx_px": 100,
+      "badge_dy_px": 78,
+      "badge_w_px": 197,
+      "badge_h_px": 96,
+      "row_ref_px": [
+        1433,
+        315
+      ],
+      "calibration_score": 1.0,
+      "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
     }
   ]
 }

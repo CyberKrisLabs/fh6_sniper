@@ -135,6 +135,40 @@
           "h_pct": 0.1155
         }
       ]
+    },
+    {
+      "label": "3193x1840",
+      "window_ref_physical": {
+        "width": 3193,
+        "height": 1840,
+        "dpr": 1.5
+      },
+      "rows": [
+        {
+          "x_pct": 0.0402,
+          "y_pct": 0.172,
+          "w_pct": 0.4491,
+          "h_pct": 0.1712
+        },
+        {
+          "x_pct": 0.0402,
+          "y_pct": 0.353,
+          "w_pct": 0.4491,
+          "h_pct": 0.1712
+        },
+        {
+          "x_pct": 0.0402,
+          "y_pct": 0.5348,
+          "w_pct": 0.4491,
+          "h_pct": 0.1712
+        },
+        {
+          "x_pct": 0.0402,
+          "y_pct": 0.7158,
+          "w_pct": 0.4491,
+          "h_pct": 0.1712
+        }
+      ]
     }
   ],
   "note": "Multi-profile format. Each profile stores row percentages calibrated at a specific window size. Load with window_utils.get_tuned_row_regions()."
