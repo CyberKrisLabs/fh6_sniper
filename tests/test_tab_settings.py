@@ -31,7 +31,7 @@ def test_initial_values_in_range(settings_tab):
 def test_preset_fast_applies_values(settings_tab):
     settings_tab.preset_combo.setCurrentText("Fast")
     assert abs(settings_tab.buy_interval_spin.value() - 0.3) < 0.01
-    assert abs(settings_tab.post_buy_spin.value() - 5.0) < 0.01
+    assert abs(settings_tab.post_buy_spin.value() - 4.0) < 0.01
     assert abs(settings_tab.reset_interval_spin.value() - 0.7) < 0.01
 
 
@@ -52,7 +52,7 @@ def test_save_shows_success_feedback(settings_tab, qtbot):
 
 def test_detect_preset_mid(settings_tab):
     settings_tab.buy_interval_spin.setValue(0.5)
-    settings_tab.post_buy_spin.setValue(5.5)
+    settings_tab.post_buy_spin.setValue(5.0)
     settings_tab.reset_interval_spin.setValue(0.8)
     settings_tab._detect_preset()
     assert settings_tab.preset_combo.currentText() == "Mid"

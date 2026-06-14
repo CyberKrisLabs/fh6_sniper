@@ -47,8 +47,8 @@ Every keystroke is gated behind a focus check — if FH6 loses focus, the sniper
 
 | Preset | Buy Interval | Post-buy Wait | Reset Interval | Best For |
 |---|---|---|---|---|
-| Fast | 0.3 s | 5.0 s | 0.7 s | High-end PC, fast connection |
-| Mid | 0.5 s | 5.5 s | 0.8 s | Average PC, stable connection |
+| Fast | 0.3 s | 4.0 s | 0.7 s | High-end PC, fast connection |
+| Mid | 0.5 s | 5.0 s | 0.8 s | Average PC, stable connection |
 | Slow | 0.7 s | 6.0 s | 1.1 s | Slower PC or laggy connection |
 | Custom | — | — | — | Manual control over each value |
 

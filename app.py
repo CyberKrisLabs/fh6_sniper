@@ -1166,6 +1166,7 @@ class SniperTab(QWidget):
         dlg.setCheckBox(skip_cb)
         go_btn = dlg.addButton("Cancel & Calibrate", QMessageBox.ButtonRole.AcceptRole)
         dlg.addButton("Continue Without Calibration", QMessageBox.ButtonRole.RejectRole)
+        dlg.setMinimumWidth(560)
         dlg.exec()
         if skip_cb.isChecked():
             settings.set_skip_calibration_warning(True)
@@ -1452,7 +1453,9 @@ class CalibrationTab(QWidget):
         self.manual_badge_btn.setEnabled(enabled)
         self.auto_remove_btn.setEnabled(enabled and calibrator.has_auto_region())
         self.manual_remove_btn.setEnabled(enabled and calibrator.has_manual_region())
-        self.test_btn.setEnabled(enabled and calibrator.has_manual_region())
+        self.test_btn.setEnabled(
+            enabled and (calibrator.has_manual_region() or calibrator.has_auto_region())
+        )
         has_badge = window_utils.load_badge_params() is not None
         self.test_badge_btn.setEnabled(enabled and has_badge)
         self.overlay_btn.setEnabled(
@@ -1731,18 +1734,28 @@ class CalibrationTab(QWidget):
         self._refresh_status()
 
     def _test_region(self):
-        region = calibrator.load_region() if calibrator.has_manual_region() else None
+        if calibrator.has_manual_region():
+            region = calibrator.load_region()
+            label = "manual"
+        elif calibrator.has_auto_region():
+            region = calibrator.load_auto_region()
+            label = "auto"
+        else:
+            region = None
+            label = ""
         if region is None:
-            self.result_label.setText("No manual region set")
+            self.result_label.setText("No calibration region set")
             return
         self.result_label.setText("Testing region…")
 
         def _work():
             found = sniper.car_available(region)
             if found:
-                self.result_label.setText("✅ Auction button detected in manual region")
+                self.result_label.setText(f"✅ Auction button detected in {label} region")
             else:
-                self.result_label.setText("❌ Auction button NOT detected — check region alignment")
+                self.result_label.setText(
+                    f"❌ Auction button NOT detected — check {label} region alignment"
+                )
 
         threading.Thread(target=_work, daemon=True).start()
 
@@ -1813,17 +1826,11 @@ class CalibrationTab(QWidget):
                 )
                 return
 
-            # get_row_regions already uses the correct DPR-aware formula
-            # (same arithmetic as tune_rows._base_rows / measure_sold_region).
             row_rects_phys = window_utils.get_row_regions(win)
 
-            badge_rects_phys = []
-            for rx, ry, rw, rh in row_rects_phys:
-                bx = rx + int(rw * bp["badge_x_pct"])
-                by = ry + int(rh * bp["badge_y_pct"])
-                bw = max(1, int(rw * bp["badge_w_pct"]))
-                bh = max(1, int(rh * bp["badge_h_pct"]))
-                badge_rects_phys.append((bx, by, bw, bh))
+            badge_rects_phys = [
+                vision_utils.badge_scan_region(row, bp) for row in row_rects_phys
+            ]
 
             self._badge_overlay = _BadgeRegionOverlay(
                 badge_rects_phys, row_rects_phys, duration_ms=4000
@@ -1838,8 +1845,8 @@ class CalibrationTab(QWidget):
 # ---------------------------------------------------------------------------
 
 PRESETS = {
-    "Fast": {"buy_attempt_interval": 0.3, "post_buy_wait": 5.0, "reset_interval": 0.7},
-    "Mid": {"buy_attempt_interval": 0.5, "post_buy_wait": 5.5, "reset_interval": 0.8},
+    "Fast": {"buy_attempt_interval": 0.3, "post_buy_wait": 4.0, "reset_interval": 0.7},
+    "Mid": {"buy_attempt_interval": 0.5, "post_buy_wait": 5.0, "reset_interval": 0.8},
     "Slow": {"buy_attempt_interval": 0.7, "post_buy_wait": 6.0, "reset_interval": 1.1},
 }
 

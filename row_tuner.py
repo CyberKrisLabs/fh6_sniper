@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import vision_utils
 import window_utils
 from window_utils import (
     ROW_HEIGHT_PCT,
@@ -148,10 +149,9 @@ class TuneOverlay(QWidget):
             painter.drawText(rx + 6, ry + 20, label)
 
             if self._badge:
-                bx = rx + int(rw * self._badge["badge_x_pct"])
-                by = ry + int(rh * self._badge["badge_y_pct"])
-                bw = max(1, int(rw * self._badge["badge_w_pct"]))
-                bh = max(1, int(rh * self._badge["badge_h_pct"]))
+                bx, by, bw, bh = vision_utils.badge_scan_region(
+                    (rx, ry, rw, rh), self._badge
+                )
                 bp = QPen(BADGE_COLOR)
                 bp.setWidth(2)
                 bp.setStyle(Qt.PenStyle.DashLine)

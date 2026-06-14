@@ -499,6 +499,30 @@ def row_has_car(region: tuple[int, int, int, int], dark_threshold: int = 150, ro
         return True  # fail-safe: assume car present so we don't skip real ones
 
 
+def badge_scan_region(
+    row_region: tuple[int, int, int, int],
+    badge_params: dict,
+    pad_pct: float = 0.15,
+) -> tuple[int, int, int, int]:
+    """Return the actual badge scan region used by the sniper (padded by pad_pct each side).
+
+    Single source of truth so tools and detection code show/use identical regions.
+    Clipped to stay within row_region.
+    """
+    rx, ry, rw, rh = row_region
+    bx = rx + int(rw * badge_params["badge_x_pct"])
+    by = ry + int(rh * badge_params["badge_y_pct"])
+    bw = max(1, int(rw * badge_params["badge_w_pct"]))
+    bh = max(1, int(rh * badge_params["badge_h_pct"]))
+    pad_x = max(1, int(bw * pad_pct))
+    pad_y = max(1, int(bh * pad_pct))
+    bx = max(rx, bx - pad_x)
+    by = max(ry, by - pad_y)
+    bw = min(rx + rw - bx, bw + 2 * pad_x)
+    bh = min(ry + rh - by, bh + 2 * pad_y)
+    return (bx, by, bw, bh)
+
+
 def detect_sold(
     row_region: tuple[int, int, int, int],
     badge_params: dict,
@@ -517,14 +541,11 @@ def detect_sold(
         template_path: absolute path to sold_badge_template.png.
         confidence: template-match threshold (0–1).
     """
-    rx, ry, rw, rh = row_region
-    bx = rx + int(rw * badge_params["badge_x_pct"])
-    by = ry + int(rh * badge_params["badge_y_pct"])
-    bw = max(1, int(rw * badge_params["badge_w_pct"]))
-    bh = max(1, int(rh * badge_params["badge_h_pct"]))
+    bx, by, bw, bh = badge_scan_region(row_region, badge_params)
     scan = (bx, by, bw, bh)
 
     # Pick primary variant based on row width vs screen width (row ≈ 30 % of window)
+    rx, ry, rw, rh = row_region
     screen_w = pyautogui.size()[0]
     rw_pct = rw / screen_w if screen_w else 1.0
     if rw_pct < MED_PERCENT_WIDTH * 0.30:
@@ -558,6 +579,58 @@ def detect_sold(
     return False
 
 
+def _region_is_yellow(img_bgr: np.ndarray, min_fraction: float = 0.05) -> bool:
+    """Return True if the region looks like the flat-yellow sold badge.
+
+    Two checks must both pass:
+    1. Enough yellow pixels (hue 24-38/180, high S+V) — rejects red badges, orange cars, grey UI.
+    2. Yellow pixels are brightness-uniform (low std-dev in HSV Value) — rejects car
+       paint which has lighting gradients/specular highlights baked in by the renderer.
+       A flat UI badge has essentially constant V; a 3D car body does not.
+    """
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, np.array([24, 100, 100]), np.array([38, 255, 255]))
+    if float(mask.sum()) / (255.0 * mask.size) < min_fraction:
+        return False
+    yellow_v = hsv[:, :, 2][mask > 0]
+    if len(yellow_v) < 20:
+        return False
+    return float(np.std(yellow_v)) < 40
+
+
+_tesseract_ok: bool | None = None
+
+
+def _tesseract_available() -> bool:
+    global _tesseract_ok
+    if _tesseract_ok is None:
+        try:
+            import pytesseract  # noqa: F401
+
+            pytesseract.get_tesseract_version()
+            _tesseract_ok = True
+        except Exception:
+            _tesseract_ok = False
+    return bool(_tesseract_ok)
+
+
+def _sold_badge_ocr(img_bgr: np.ndarray) -> bool:
+    """Return True if OCR finds 'SOLD' in the badge region.
+
+    Pre-processing: scale up 3× then threshold to black-on-white so
+    Tesseract sees clean high-contrast letter shapes regardless of the
+    exact yellow shade or display scaling in use.
+    """
+    import pytesseract
+
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+    scaled = cv2.resize(gray, (w * 3, h * 3), interpolation=cv2.INTER_CUBIC)
+    _, thresh = cv2.threshold(scaled, 100, 255, cv2.THRESH_BINARY)
+    text = pytesseract.image_to_string(thresh, config="--psm 7")
+    return "SOLD" in text.upper()
+
+
 def sold_badge_score(
     row_region: tuple[int, int, int, int],
     badge_params: dict,
@@ -576,12 +649,9 @@ def sold_badge_score(
                  second screenshot — avoids frame-timing issues where a second
                  grab_region call returns a different (stale) frame.
     """
-    rx, ry, rw, rh = row_region
-    bx = rx + int(rw * badge_params["badge_x_pct"])
-    by = ry + int(rh * badge_params["badge_y_pct"])
-    bw = max(1, int(rw * badge_params["badge_w_pct"]))
-    bh = max(1, int(rh * badge_params["badge_h_pct"]))
+    bx, by, bw, bh = badge_scan_region(row_region, badge_params)
 
+    rx, ry, rw, rh = row_region
     screen_w = pyautogui.size()[0]
     rw_pct = rw / screen_w if screen_w else 1.0
     if rw_pct < MED_PERCENT_WIDTH * 0.30:
@@ -590,6 +660,16 @@ def sold_badge_score(
         primary = template_path
 
     candidates: list[str] = []
+    # Try the pixel-captured template from badge calibration first (may score
+    # slightly higher than the generic pre-made templates for this display).
+    try:
+        with open(CONFIG_FILE) as _f:
+            _cfg = json.load(_f)
+        _captured = _cfg.get("CAPTURED_SOLD_BADGE_TEMPLATE")
+        if _captured and os.path.isfile(_captured):
+            candidates.append(_captured)
+    except Exception:
+        pass
     for p in [
         primary,
         template_path.replace(".png", "_med.png"),
@@ -607,6 +687,20 @@ def sold_badge_score(
         screen_img = cv2.cvtColor(np.array(badge_pil), cv2.COLOR_RGB2BGR)
     except Exception:
         return 0.0
+
+    # Gate on yellow color: the sold badge is bright yellow (hue 24-38/180).
+    # Red "not-sold" badges, orange cars, and grey UI elements all return 0.0.
+    if not _region_is_yellow(screen_img):
+        return 0.0
+
+    # OCR path: read the letters directly — a yellow/black car body will never
+    # contain the word "SOLD", so this eliminates all false positives from
+    # similar-coloured cars that fool template matching.
+    if _tesseract_available():
+        try:
+            return 1.0 if _sold_badge_ocr(screen_img) else 0.0
+        except Exception:
+            pass  # fall through to template matching on unexpected OCR failure
 
     best = 0.0
     sh, sw = screen_img.shape[:2]

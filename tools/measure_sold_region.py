@@ -32,7 +32,6 @@ from PySide6.QtWidgets import (
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import window_utils
-from window_utils import ROW_HEIGHT_PCT, ROW_WIDTH_PCT, ROW_X_PCT, ROW_Y_START_PCT
 
 # ── Default badge box (fraction of row card) ─────────────────────────────────
 # Starting guess: top-left ~15 % wide × 40 % tall of the card.
@@ -41,48 +40,14 @@ DEFAULT_Y_PCT = 0.00
 DEFAULT_W_PCT = 0.15
 DEFAULT_H_PCT = 0.40
 
-ROW_COLOR = QColor(60, 210, 60, 200)  # green border = row 1
-BADGE_COLOR = QColor(255, 200, 40, 230)  # yellow = badge scan region
-
-
-def get_row1(win_x: int, win_y: int, win_w: int, win_h: int) -> tuple[int, int, int, int]:
-    """Return Row 1 rect in Qt logical pixels (formula fallback)."""
-    dpr = QApplication.primaryScreen().devicePixelRatio()
-    x = int(win_x / dpr + (win_w / dpr) * ROW_X_PCT)
-    w = int(win_w * ROW_WIDTH_PCT)
-    h = int(win_h * ROW_HEIGHT_PCT)
-    y = win_y + int(win_h * ROW_Y_START_PCT)
-    return (x, y, w, h)
+ROW_COLOR = QColor(60, 210, 60, 200)    # green border = row 1
+BADGE_COLOR = QColor(255, 200, 40, 230)  # yellow = raw calibration box
+SCAN_COLOR = QColor(255, 140, 0, 230)    # orange = padded scan region the sniper uses
 
 
 def load_saved_badge(win_w: int | None = None, win_h: int | None = None) -> dict | None:
     """Load previously saved badge percentages, picking the best profile for the given window."""
     return window_utils.load_badge_params(win_w, win_h)
-
-
-def get_tuned_row1(win) -> tuple[int, int, int, int] | None:
-    """Return Row 1 from docs/row_regions_tuned.json in Qt logical pixels, or None."""
-    tuned_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "docs",
-        "row_regions_tuned.json",
-    )
-    try:
-        with open(tuned_path) as f:
-            data = json.load(f)
-        rows = data.get("rows", [])
-        if not rows:
-            return None
-        r = rows[0]
-        dpr = QApplication.primaryScreen().devicePixelRatio()
-        wx, wy, ww, wh = win.left, win.top, win.width, win.height
-        x = int(wx / dpr + (ww / dpr) * r["x_pct"])
-        y = wy + int(wh * r["y_pct"])
-        w = int(ww * r["w_pct"])
-        h = int(wh * r["h_pct"])
-        return (x, y, w, h)
-    except (FileNotFoundError, json.JSONDecodeError, KeyError):
-        return None
 
 
 # ── Overlay ──────────────────────────────────────────────────────────────────
@@ -101,15 +66,18 @@ class SoldRegionOverlay(QWidget):
         self.setGeometry(QApplication.primaryScreen().geometry())
         self._row: tuple[int, int, int, int] | None = None
         self._badge: tuple[int, int, int, int] | None = None
+        self._scan: tuple[int, int, int, int] | None = None
         self.show()
 
     def set_regions(
         self,
         row: tuple[int, int, int, int] | None,
         badge: tuple[int, int, int, int] | None,
+        scan: tuple[int, int, int, int] | None = None,
     ) -> None:
         self._row = row
         self._badge = badge
+        self._scan = scan
         self.update()
 
     def paintEvent(self, _event) -> None:
@@ -127,6 +95,21 @@ class SoldRegionOverlay(QWidget):
         painter.drawRect(rx, ry, rw, rh)
         painter.drawText(rx + 6, ry + 20, "Row 1")
 
+        if self._scan:
+            sx, sy, sw, sh = self._scan
+            pen3 = QPen(SCAN_COLOR)
+            pen3.setWidth(2)
+            pen3.setStyle(Qt.PenStyle.SolidLine)
+            painter.setPen(pen3)
+            fill3 = QColor(SCAN_COLOR)
+            fill3.setAlpha(25)
+            painter.setBrush(fill3)
+            painter.drawRect(sx, sy, sw, sh)
+            lc3 = QColor(SCAN_COLOR)
+            lc3.setAlpha(255)
+            painter.setPen(lc3)
+            painter.drawText(sx + 4, sy + 16, "sniper scan region (+30%)")
+
         if self._badge:
             bx, by, bw, bh = self._badge
             pen2 = QPen(BADGE_COLOR)
@@ -137,11 +120,10 @@ class SoldRegionOverlay(QWidget):
             fill.setAlpha(35)
             painter.setBrush(fill)
             painter.drawRect(bx, by, bw, bh)
-
             lc = QColor(BADGE_COLOR)
             lc.setAlpha(255)
             painter.setPen(lc)
-            painter.drawText(bx + 4, by + 16, '"Sold!" scan region')
+            painter.drawText(bx + 4, by + 32, 'calibration target')
 
 
 # ── Control panel ─────────────────────────────────────────────────────────────
@@ -295,9 +277,10 @@ class ControlPanel(QWidget):
             f"FH6:  {win.width}×{win.height} phys  ({lw}×{lh} logical)  DPR={dpr:.2f}"
         )
 
-        tuned = get_tuned_row1(win)
-        row = tuned if tuned is not None else get_row1(win.left, win.top, win.width, win.height)
-        source = "tuned" if tuned is not None else "formula"
+        phys_rows = window_utils.get_row_regions(win)
+        rx_p, ry_p, rw_p, rh_p = phys_rows[0]
+        row = (int(rx_p / dpr), int(ry_p / dpr), int(rw_p / dpr), int(rh_p / dpr))
+        source = "tuned" if window_utils.get_tuned_row_regions(win) else "formula"
         self._row = row
         rx, ry, rw, rh = row
 
@@ -317,7 +300,17 @@ class ControlPanel(QWidget):
             self._init = True
 
         badge = (rx + self._bdx, ry + self._bdy, self._bw, self._bh)
-        self._overlay.set_regions(row, badge)
+
+        # Compute the padded scan region that the sniper will actually use
+        pad_x = max(1, int(self._bw * 0.15))
+        pad_y = max(1, int(self._bh * 0.15))
+        sx = max(rx, rx + self._bdx - pad_x)
+        sy = max(ry, ry + self._bdy - pad_y)
+        sw = min(rx + rw - sx, self._bw + 2 * pad_x)
+        sh = min(ry + rh - sy, self._bh + 2 * pad_y)
+        scan = (sx, sy, sw, sh)
+
+        self._overlay.set_regions(row, badge, scan)
 
         self.row_label.setText(f"Row 1 [{source}]:  ({rx},{ry})  {rw}×{rh} px")
 

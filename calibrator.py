@@ -426,6 +426,8 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
                     best_template_name = tpl_name
                     best_info = {
                         "row_idx": row_idx,
+                        "rx": rx,
+                        "ry": ry,
                         "rw": rw,
                         "rh": rh,
                         "match_x": max_loc[0],
@@ -474,6 +476,29 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
         result_dict, win.width, win.height, window_utils._get_display_dpr()
     )
 
+    # Capture the actual badge pixels as a pixel-perfect template.
+    # Generic pre-made PNGs match the in-game badge at ~0.73 after scaling;
+    # a captured template matches at scale≈1.0 and scores ~0.95+, which
+    # creates a clear gap above yellow/black car bodies (~0.75).
+    try:
+        ax = best_info["rx"] + best_info["match_x"]
+        ay = best_info["ry"] + best_info["match_y"]
+        mw, mh = best_info["match_w"], best_info["match_h"]
+        badge_crop = full_img.crop((ax, ay, ax + mw, ay + mh))
+        captured_path = window_utils.get_user_data_file("sold_badge_captured_template.png")
+        badge_crop.save(captured_path)
+        try:
+            with open(CONFIG_FILE) as f:
+                _cfg = json.load(f)
+        except FileNotFoundError:
+            _cfg = {}
+        _cfg["CAPTURED_SOLD_BADGE_TEMPLATE"] = captured_path
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(_cfg, f, indent=2)
+        _status(f"📸 Captured badge template saved ({mw}×{mh} px)")
+    except Exception as _e:
+        _status(f"⚠️ Could not capture badge template: {_e}")
+
     row_num = best_info["row_idx"] + 1
     _status(
         f"✅ Badge calibration: score={best_score:.3f} detected in row {row_num}  "
@@ -501,6 +526,19 @@ def load_sold_badge_template() -> str | None:
         return data.get("AUTO_SOLD_BADGE_TEMPLATE")
     except Exception:
         return None
+
+
+def load_captured_badge_template() -> str | None:
+    """Return the pixel-captured badge template path if it exists, else None."""
+    try:
+        with open(CONFIG_FILE) as f:
+            data = json.load(f)
+        path = data.get("CAPTURED_SOLD_BADGE_TEMPLATE")
+        if path and os.path.isfile(path):
+            return path
+    except Exception:
+        pass
+    return None
 
 
 def reset_sold_badge_auto_cal() -> None:
@@ -681,6 +719,7 @@ def reset_auto_region(status_label=None):
         "AUTO_AUCTION_OPTIONS_TEMPLATE",
         "AUTO_AUCTION_OPTIONS_SCALE",
         "AUTO_SOLD_BADGE_TEMPLATE",
+        "CAPTURED_SOLD_BADGE_TEMPLATE",
     ]
 
     for key in keys_to_remove:

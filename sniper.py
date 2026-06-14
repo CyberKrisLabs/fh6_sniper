@@ -25,7 +25,7 @@ pyautogui.FAILSAFE = False
 # Base confidence used for auto-calibrated templates. Other call sites
 # already use lower, tuned thresholds (~0.65–0.72); 0.8 was too strict here.
 CONFIDENCE = 0.7
-SOLD_THRESHOLD = 0.64
+SOLD_THRESHOLD = 0.68
 CONFIG_FILE = window_utils.get_config_file()
 
 # -------------------------
@@ -276,16 +276,16 @@ def find_last_available_row(
             )
             if score >= SOLD_THRESHOLD:
                 if log:
-                    log(f"  Row {idx + 1}: sold [{score:.2f} ≥{SOLD_THRESHOLD}]")
+                    log(f"  Row {idx + 1}: sold")
                 continue
             if score < 0.10:
                 # Score this low means detection failed (transition frame, bad region, etc.)
                 # Default to sold so we never attempt a buy on a detection failure.
                 if log:
-                    log(f"  Row {idx + 1}: uncertain [{score:.2f}] — skipping")
+                    log(f"  Row {idx + 1}: uncertain — skipping")
                 continue
             if log:
-                log(f"  Row {idx + 1}: available [{score:.2f} <{SOLD_THRESHOLD}]")
+                log(f"  Row {idx + 1}: available")
         else:
             if log:
                 log(f"  Row {idx + 1}: available")
@@ -398,6 +398,27 @@ def buy_sequence(t, full_region=None, stop_event=None, log=None):
         raw = pyautogui.screenshot()
 
     result = _detect_buy_result(raw, full_region)
+
+    # Retry while undetermined — the success/fail screen can appear late.
+    # All retries happen BEFORE the reset keystrokes so we don't navigate away
+    # before the screen has had a chance to render.
+    retry_wait = t.get("buy_result_retry_wait", 0.8)
+    for _ in range(3):
+        if result is not None:
+            break
+        _sleep(retry_wait)
+        raw = vision_utils.grab_full_screen()
+        if raw is None:
+            raw = pyautogui.screenshot()
+        result = _detect_buy_result(raw, full_region)
+
+    if log:
+        if result is True:
+            log("✅ Buy successful")
+        elif result is False:
+            log("❌ Buy failed")
+        else:
+            log("⚠️ Buy result undetermined")
 
     pyautogui.typewrite(["\n", "esc", "esc", "\n", "\n"], interval=t["reset_interval"])
     return result
@@ -591,9 +612,20 @@ def sniper_loop(
                             stop_event=stop_event,
                             log=logger_callback,
                         )
+                        # After a buy attempt the auction list may still show the
+                        # purchased car as available (server hasn't updated yet).
+                        # reset_search forces a fresh query so the next scan reads
+                        # current server state rather than the pre-buy cached results.
+                        # The extra wait after reset lets the game finish loading
+                        # search results before we scan again — without it the next
+                        # car_available() check can catch the game mid-transition
+                        # (loading screen / search form) and report False, causing
+                        # the sniper to miss cars that are visually available.
+                        refreshes += 1
+                        reset_search(timings, stop_event=stop_event, log=logger_callback)
+                        stop_event.wait(timings.get("reset_interval", 0.8))
                         if result is True:
                             successes += 1
-                            logger_callback(f"Attempt #{buy_attempts} ✅ Buy successful")
                             if buyout_target is not None and successes >= buyout_target:
                                 logger_callback(
                                     f"🏁 Buyout target reached ({successes}/{buyout_target}) - stopping sniper"
@@ -602,9 +634,6 @@ def sniper_loop(
                                 break
                         elif result is False:
                             failures += 1
-                            logger_callback(f"Attempt #{buy_attempts} ❌ Buy failed")
-                        else:
-                            logger_callback(f"Attempt #{buy_attempts} ⚠️ Result undetermined")
 
                     if status_callback:
                         try:
