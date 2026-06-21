@@ -518,14 +518,14 @@ def sniper_loop(
             # ensure buy-detection has a sensible full_region fallback
             if full_region is None:
                 full_region = manual_region
-            logger_callback(f"✅ Using manual calibrated region: {manual_region}")
+            logger_callback("✅ Using manual calibration")
         elif auto_region:
             # If auto calibrated, use that region for detection
             bottom_left_region = auto_region
             # ensure buy-detection has a sensible full_region fallback
             if full_region is None:
                 full_region = auto_region
-            logger_callback(f"✅ Using auto calibrated region: {auto_region}")
+            logger_callback("✅ Using auto calibration")
         elif full_region:
             bottom_left_region = window_utils.bottom_left_quarter(full_region)
             logger_callback(

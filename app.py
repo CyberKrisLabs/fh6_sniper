@@ -81,6 +81,7 @@ class _CalibrationOverlay(QWidget):
 
     _text_signal = Signal(str)
     _close_signal = Signal()
+    _img_signal = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(
@@ -92,28 +93,43 @@ class _CalibrationOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._text_signal.connect(self._on_set_text)
         self._close_signal.connect(self.close)
+        self._img_signal.connect(self._on_set_image)
         self._custom_pos: QPoint | None = None
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        container = QWidget()
+        container.setStyleSheet(
+            "QWidget { background-color: rgba(0,0,0,215);"
+            " border-radius: 10px;"
+            " border: 2px solid #f5a623; }"
+        )
+        row = QHBoxLayout(container)
+        row.setContentsMargins(18, 14, 28, 14)
+        row.setSpacing(14)
+
+        self._img_label = QLabel()
+        self._img_label.setStyleSheet("border: none; background: transparent;")
+        self._img_label.setVisible(False)
+        row.addWidget(self._img_label)
 
         self._label = QLabel("")
         self._label.setStyleSheet(
-            "background-color: rgba(0,0,0,215);"
+            "border: none; background: transparent;"
             " color: #ffffff;"
             " font-size: 15pt; font-weight: bold;"
-            " padding: 18px 28px;"
-            " border-radius: 10px;"
-            " border: 2px solid #f5a623;"
         )
         self._label.setAlignment(Qt.AlignCenter)
         self._label.setWordWrap(True)
-        self._label.setMinimumWidth(640)
-        layout.addWidget(self._label)
+        self._label.setMinimumWidth(580)
+        row.addWidget(self._label, 1)
+
+        outer.addWidget(container)
 
         self.adjustSize()
         screen = QApplication.primaryScreen().geometry()
-        self.move((screen.width() - self.width()) // 2, 60)
+        self.move((screen.width() - self.width()) // 2, int(screen.height() * 0.15))
         self.show()
 
     def _on_set_text(self, text: str):
@@ -123,7 +139,21 @@ class _CalibrationOverlay(QWidget):
             self.move(self._custom_pos)
         else:
             screen = QApplication.primaryScreen().geometry()
-            self.move((screen.width() - self.width()) // 2, 60)
+            self.move((screen.width() - self.width()) // 2, int(screen.height() * 0.15))
+
+    def _on_set_image(self, path: str) -> None:
+        if path and os.path.isfile(path):
+            pix = QPixmap(path).scaledToHeight(48, Qt.TransformationMode.SmoothTransformation)
+            self._img_label.setPixmap(pix)
+            self._img_label.setVisible(True)
+        else:
+            self._img_label.clear()
+            self._img_label.setVisible(False)
+        self.adjustSize()
+
+    def show_image(self, path: str) -> None:
+        """Show a template thumbnail in the banner (thread-safe)."""
+        self._img_signal.emit(path)
 
     # ── Tkinter-compatible interface (safe to call from background thread) ──
 
@@ -153,7 +183,7 @@ class _CalibrationOverlay(QWidget):
         win_right = int((win.left + win.width) / dpr)
         win_top = int(win.top / dpr)
         x = win_right - self.width() - 12
-        y = win_top + extra_y + 8
+        y = win_top + extra_y + int(QApplication.primaryScreen().geometry().height() * 0.15)
         self._custom_pos = QPoint(x, y)
         self.move(x, y)
 
@@ -910,10 +940,9 @@ class SniperTab(QWidget):
         """Manual calibration — auction button only (overlay trigger)."""
         _root = os.path.dirname(os.path.abspath(__file__))
         tpl = os.path.join(_root, "assets", "auction_options_template_med.png")
-        if self._ingame_overlay:
-            self._ingame_overlay.show_calib_image(tpl)
         self._set_calibration_mode(False)
         self._active_cal_overlay = _CalibrationOverlay()
+        self._active_cal_overlay.show_image(tpl)
         extra_y = self._ingame_overlay.height() if self._ingame_overlay else 0
         self._active_cal_overlay.reposition_for_ingame(extra_y=extra_y)
         cal_overlay = self._active_cal_overlay  # local alias for closure
@@ -939,8 +968,6 @@ class SniperTab(QWidget):
             finally:
                 builtins.print = real_print
                 cal_overlay.destroy_later()
-                if self._ingame_overlay:
-                    self._ingame_overlay.hide_calib_image()
 
             if region:
                 cfg_path = window_utils.get_config_file()
@@ -971,10 +998,9 @@ class SniperTab(QWidget):
             return
         _root = os.path.dirname(os.path.abspath(__file__))
         tpl = os.path.join(_root, "assets", "sold_badge_template_med.png")
-        if self._ingame_overlay:
-            self._ingame_overlay.show_calib_image(tpl)
         self._set_calibration_mode(False)
         self._active_cal_overlay = _CalibrationOverlay()
+        self._active_cal_overlay.show_image(tpl)
         extra_y = self._ingame_overlay.height() if self._ingame_overlay else 0
         self._active_cal_overlay.reposition_for_ingame(extra_y=extra_y)
         cal_overlay = self._active_cal_overlay  # local alias for closure
@@ -984,8 +1010,6 @@ class SniperTab(QWidget):
                 self._calib_tab._show_sold_badge_step(cal_overlay)
             finally:
                 cal_overlay.destroy_later()
-                if self._ingame_overlay:
-                    self._ingame_overlay.hide_calib_image()
                 self._calib_mode_signal.emit(True)
 
         threading.Thread(target=_work, daemon=True).start()
@@ -1617,30 +1641,31 @@ class CalibrationTab(QWidget):
                 result = calibrator.auto_calibrate(status_label=status_proxy)
             finally:
                 builtins.print = real_print
-            # auto_calibrate returns (True, verified) on success or False on failure
+            # auto_calibrate returns (True, verified, badge_ok) on success or False on failure
             if result and result is not False:
-                success, verified = result if isinstance(result, tuple) else (result, None)
+                unpacked = result if isinstance(result, tuple) else (result, None, None)
+                success = unpacked[0]
+                verified = unpacked[1] if len(unpacked) > 1 else None
+                badge_ok = unpacked[2] if len(unpacked) > 2 else None
             else:
-                success, verified = False, None
+                success, verified, badge_ok = False, None, None
 
             if success:
                 self._sniper_tab.mark_calibration_done()
-                badge_tpl = calibrator.load_sold_badge_template() or "default"
-                badge_name = os.path.basename(badge_tpl)
+                badge_line = (
+                    "   Sold badge position calibrated."
+                    if badge_ok
+                    else "   Sold badge position not detected — using built-in templates."
+                )
                 if verified:
                     _emit_log("✅ Auto calibration complete and verified")
-                    self.result_label.setText(
-                        f"✅ Calibration saved and verified — button re-detected in saved region.\n"
-                        f"   Sold badge template: {badge_name}"
-                    )
+                    self.result_label.setText(f"✅ Calibration saved and verified.\n{badge_line}")
                 else:
                     _emit_log("⚠️ Auto calibration saved but verification failed")
                     self.result_label.setText(
-                        "⚠️ Calibration saved but the button was NOT re-detected"
-                        " in the saved region.\n"
-                        "   The auction screen may have changed — try recalibrating with it "
-                        "clearly visible.\n"
-                        f"   Sold badge template: {badge_name}"
+                        "⚠️ Calibration saved but could not be verified.\n"
+                        "   Try recalibrating with the auction screen clearly visible.\n"
+                        f"{badge_line}"
                     )
                     self.result_label.setStyleSheet(
                         "font-style: italic; font-size: 11pt; color: #ff9800;"
@@ -1794,13 +1819,11 @@ class CalibrationTab(QWidget):
                 overlay.config(text=f"Move mouse to TOP-LEFT corner of sold badge ({i})")
                 time.sleep(1)
             pt1 = pyautogui.position()
-            _emit_log(f"📌 Top-left: {pt1.x}, {pt1.y}")
 
             for i in range(5, 0, -1):
                 overlay.config(text=f"Move mouse to BOTTOM-RIGHT corner of sold badge ({i})")
                 time.sleep(1)
             pt2 = pyautogui.position()
-            _emit_log(f"📌 Bottom-right: {pt2.x}, {pt2.y}")
         finally:
             if _close_overlay:
                 overlay.destroy_later()
@@ -1964,6 +1987,51 @@ class SettingsTab(QWidget):
         self._build_ui()
         self._load_values()
 
+    def _show_buy_interval_info(self):
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Buy Interval")
+        dlg.setText("<b>Buy Interval</b>")
+        dlg.setInformativeText(
+            "The delay (in seconds) between each key press during the buy sequence.\n\n"
+            "When the sniper spots an available car it presses a series of keys to open "
+            "the buy dialog and confirm the purchase. This interval is the pause between "
+            "each of those key presses.\n\n"
+            "Lower = faster buy attempt, but too low and the game may not register inputs "
+            "in time. Raise it if purchases are failing due to missed key presses."
+        )
+        dlg.setIcon(QMessageBox.Icon.Information)
+        dlg.exec()
+
+    def _show_post_buy_info(self):
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Post Buy Wait")
+        dlg.setText("<b>Post Buy Wait</b>")
+        dlg.setInformativeText(
+            "How long (in seconds) the sniper waits after completing the buy sequence "
+            "before checking whether the purchase succeeded.\n\n"
+            "The game needs a moment to process the transaction and display the result. "
+            "On slower connections or laggy servers this takes longer.\n\n"
+            "If successful buys are being logged as failed, try increasing this value."
+        )
+        dlg.setIcon(QMessageBox.Icon.Information)
+        dlg.exec()
+
+    def _show_reset_interval_info(self):
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Reset Interval")
+        dlg.setText("<b>Reset Interval</b>")
+        dlg.setInformativeText(
+            "The delay (in seconds) between each key press when the sniper resets the "
+            "auction list to refresh it for the next scan cycle.\n\n"
+            "After each pass through the auction rows the sniper navigates back to "
+            "trigger a fresh list. This interval controls how fast those navigation "
+            "key presses fire.\n\n"
+            "Lower = faster refresh between scans. Raise it if the auction list is not "
+            "loading correctly between cycles."
+        )
+        dlg.setIcon(QMessageBox.Icon.Information)
+        dlg.exec()
+
     def _show_scans_info(self):
         dlg = QMessageBox(self)
         dlg.setWindowTitle("Number of Scans")
@@ -2033,6 +2101,7 @@ class SettingsTab(QWidget):
             0.1,
             20.0,
             "Delay between keypresses during buy navigation.",
+            self._show_buy_interval_info,
         )
         self.post_buy_spin = self._make_float_row(
             timing_layout,
@@ -2040,6 +2109,7 @@ class SettingsTab(QWidget):
             0.1,
             20.0,
             "Wait time after a buy attempt for the game to respond.",
+            self._show_post_buy_info,
         )
         self.reset_interval_spin = self._make_float_row(
             timing_layout,
@@ -2047,6 +2117,7 @@ class SettingsTab(QWidget):
             0.1,
             20.0,
             "Delay between keypresses during auction list reset.",
+            self._show_reset_interval_info,
         )
         for spin in (self.buy_interval_spin, self.post_buy_spin, self.reset_interval_spin):
             spin.valueChanged.connect(self._on_value_changed)
@@ -2121,7 +2192,9 @@ class SettingsTab(QWidget):
         root.addStretch()
 
     @staticmethod
-    def _make_float_row(parent_layout, label: str, mn: float, mx: float, tip: str):
+    def _make_float_row(
+        parent_layout, label: str, mn: float, mx: float, tip: str, info_callback=None
+    ):
         row = QHBoxLayout()
         lbl = QLabel(label)
         lbl.setFixedWidth(160)
@@ -2133,6 +2206,17 @@ class SettingsTab(QWidget):
         spin.setFixedWidth(100)
         row.addWidget(lbl)
         row.addWidget(spin)
+        if info_callback:
+            btn = QPushButton("ⓘ")
+            btn.setFixedSize(22, 22)
+            btn.setFlat(True)
+            btn.setStyleSheet(
+                "QPushButton { font-size: 13pt; color: #2196f3; border: none; padding: 0; }"
+                "QPushButton:hover { color: #64b5f6; }"
+            )
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(info_callback)
+            row.addWidget(btn)
         row.addStretch()
         parent_layout.addLayout(row)
         return spin

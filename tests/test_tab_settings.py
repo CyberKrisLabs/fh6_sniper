@@ -5,6 +5,15 @@ import pytest
 pytest.importorskip("PySide6")
 
 import app
+import settings
+
+
+@pytest.fixture(autouse=True)
+def isolate_config(tmp_path, monkeypatch):
+    """Redirect config writes to a temp file so tests don't touch real user config."""
+    temp = tmp_path / "config.json"
+    monkeypatch.setattr(settings, "CONFIG_FILE", str(temp))
+    monkeypatch.setattr(app.calibrator, "CONFIG_FILE", str(temp))
 
 
 @pytest.fixture
