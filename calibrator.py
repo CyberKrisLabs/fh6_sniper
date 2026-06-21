@@ -29,7 +29,6 @@ def calibrate(status_label=None, error_label=None):
     def countdown(msg):
         for i in range(5, 0, -1):
             text = f"{msg} ({i})"
-            print(text)
             if status_label:
                 # Use default parameter to capture text value, not reference
                 status_label.after(0, lambda t=text: status_label.config(text=t, bootstyle="info"))
@@ -37,11 +36,9 @@ def calibrate(status_label=None, error_label=None):
 
     countdown("Move mouse to TOP-LEFT corner of Auction Options button")
     top_left_x, top_left_y = pyautogui.position()
-    print(f"Top-left captured: {top_left_x}, {top_left_y}")
 
     countdown("Move mouse to BOTTOM-RIGHT corner of Auction Options button")
     bottom_right_x, bottom_right_y = pyautogui.position()
-    print(f"Bottom-right captured: {bottom_right_x}, {bottom_right_y}")
 
     width = bottom_right_x - top_left_x
     height = bottom_right_y - top_left_y
@@ -371,7 +368,7 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
         _status("❌ Badge calibration: no row regions detected")
         return None
 
-    _status("🔍 Badge calibration: grabbing screen…")
+    _status("Detecting sold badge…")
     full_img = vision_utils.grab_full_screen()
     if full_img is None:
         full_img = pyautogui.screenshot()
@@ -384,7 +381,7 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
     if vision_utils._winrt_available():
         # OCR path: find yellow blobs in each row, read their text.
         # The blob that contains "SOLD" (but not "NOT SOLD") is the badge.
-        _status("🔍 Badge calibration: scanning rows via OCR (Windows built-in)…")
+        _status("Scanning auction rows for SOLD badge…")
 
         for row_idx, (rx, ry, rw, rh) in enumerate(row_regions):
             search_w = int(rw * SEARCH_X_FRACTION)
@@ -438,8 +435,8 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
 
         if best_info is None:
             _status(
-                "❌ Badge calibration: no 'SOLD' badge found via OCR. "
-                "Make sure a sold car is visible in the auction list."
+                "❌ No SOLD badge detected. "
+                "Make sure a sold car is visible in the auction list and try again."
             )
             return None
 
@@ -552,18 +549,12 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
         _cfg["CAPTURED_SOLD_BADGE_TEMPLATE"] = captured_path
         with open(CONFIG_FILE, "w") as f:
             json.dump(_cfg, f, indent=2)
-        _status(f"📸 Captured badge template saved ({mw}×{mh} px)")
+        _status("📸 Sold badge snapshot saved.")
     except Exception as _e:
         _status(f"⚠️ Could not capture badge template: {_e}")
 
     row_num = best_info["row_idx"] + 1
-    _status(
-        f"✅ Badge calibration complete: found in row {row_num}  "
-        f"x={result_dict['badge_x_pct'] * 100:.1f}%  "
-        f"y={result_dict['badge_y_pct'] * 100:.1f}%  "
-        f"w={result_dict['badge_w_pct'] * 100:.1f}%  "
-        f"h={result_dict['badge_h_pct'] * 100:.1f}%"
-    )
+    _status(f"✅ Sold badge detected in row {row_num} and saved.")
     return result_dict
 
 
@@ -658,11 +649,6 @@ def auto_calibrate(status_label=None):
         )
 
         # Select the best sold badge template for the current window size
-        _dbg_win = window_utils.get_fh6_window()
-        print(
-            f"🔍 FH6 window for template selection: "
-            f"{_dbg_win.width if _dbg_win else '?'}x{_dbg_win.height if _dbg_win else '?'}"
-        )
         sold_tpl = select_sold_badge_template()
 
         cfg_update = {
@@ -686,11 +672,7 @@ def auto_calibrate(status_label=None):
         with open(CONFIG_FILE, "w") as f:
             json.dump(cfg_update, f, indent=2)
 
-        print(
-            f"✅ Auto calibration saved: region={region}, "
-            f"template={template_path}, scale={scale}, "
-            f"sold_badge_template={os.path.basename(sold_tpl)}"
-        )
+        print("✅ Auction Options button found and calibrated.")
 
         # Detect and save sold badge position from the current screen.
         if status_label:
@@ -701,15 +683,15 @@ def auto_calibrate(status_label=None):
                 ),
             )
         badge_result = auto_calibrate_sold_badge(status_label)
-        if badge_result is None:
+        badge_ok = badge_result is not None
+        if not badge_ok:
             print(
-                "⚠️  Sold badge auto-calibration failed — run measure_sold_region.py "
-                "manually while a sold car is visible."
+                "⚠️  Sold badge position could not be detected — make sure a SOLD car "
+                "is visible in the auction list and try again. "
+                "The sniper will still work using the built-in badge templates."
             )
 
-        # Immediately verify the saved parameters detect the button in the saved
-        # region — catches cases where the button moved or confidence was marginal.
-        print("🔍 Verifying calibration by re-detecting in saved region…")
+        # Verify the saved parameters still detect the button in the saved region.
         margin = scale * 0.12
         verify = find_template_at_best_scale_in_region(
             template_path,
@@ -720,14 +702,13 @@ def auto_calibrate(status_label=None):
             confidence=0.65,
         )
         if verify:
-            print("✅ Verification passed — button re-detected in saved region")
+            print("✅ Calibration verified successfully.")
         else:
             print(
-                "⚠️  Verification failed — button NOT detected in saved region with saved settings.\n"
-                "    The calibration was saved but may be unreliable.\n"
-                "    Try recalibrating with the auction screen clearly visible."
+                "⚠️  Calibration saved but could not be verified — "
+                "try recalibrating with the auction screen clearly visible."
             )
-        return True, verify
+        return True, verify, badge_ok
 
     except Exception as e:
         print(f"❌ Auto calibration error: {e}")
