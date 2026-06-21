@@ -47,7 +47,7 @@ except Exception:
     requests = None
     HAVE_REQUESTS = False
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 _icon_file = window_utils.resource_path("assets/sniper.ico")
 

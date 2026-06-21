@@ -15,22 +15,29 @@ Pushing a version tag triggers the **Release** GitHub Actions workflow, which:
    __version__ = "2.1.0"
    ```
 
-2. Commit and push:
+2. Bump `#define MyAppVersion` in `installer/installer.iss` to match:
+   ```iss
+   #define MyAppVersion "2.1.0"
+   ```
+   > **Note:** The CI workflow patches this automatically, but keeping it in sync
+   > means local installer builds (see below) produce the right filename too.
+
+3. Commit and push:
    ```powershell
-   git add app.py
+   git add app.py installer/installer.iss
    git commit -m "Bump version to 2.1.0"
    git push
    ```
 
-3. Tag and push the tag — this triggers the release workflow:
+4. Tag and push the tag — this triggers the release workflow:
    ```powershell
    git tag v2.1.0
    git push origin v2.1.0
    ```
 
-4. Watch the workflow at https://github.com/CyberKrisLabs/fh6_sniper/actions
+5. Watch the workflow at https://github.com/CyberKrisLabs/fh6_sniper/actions
 
-5. When it finishes, the release is live at https://github.com/CyberKrisLabs/fh6_sniper/releases
+6. When it finishes, the release is live at https://github.com/CyberKrisLabs/fh6_sniper/releases
 
 ## Building locally
 
@@ -41,7 +48,7 @@ pyinstaller "FH6 Sniper.spec"
 
 # Then build the installer (requires Inno Setup 6):
 & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\installer.iss
-# installer appears at installer\Output\FH6_Sniper_Installer_v2.0.0.exe
+# installer appears at installer\Output\FH6_Sniper_Installer_vX.Y.Z.exe
 ```
 
 ## Updating the icon

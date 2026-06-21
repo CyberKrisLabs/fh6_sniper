@@ -23,7 +23,6 @@ a = Analysis(
     binaries=_binaries,
     datas=[
         ("assets", "assets"),
-        ("docs", "docs"),
     ],
     hiddenimports=[
         "win32api",
@@ -50,7 +49,18 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        # not used in the app — update check is try/except optional
+        "requests",
+        # we use PySide6, not tkinter (tkinter only appears in tools/shadow_mode.py)
+        "tkinter",
+        "_tkinter",
+        # unused scientific/plotting stack (may be pulled in transitively)
+        "matplotlib",
+        # Python's own top-level test package — not needed at runtime
+        # NOTE: do NOT exclude unittest — pyrect imports doctest which imports unittest
+        "test",
+    ],
     noarchive=False,
     optimize=0,
 )

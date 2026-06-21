@@ -1,14 +1,12 @@
 PySide6
 pyautogui
-mss
 dxcam
 Pillow
 PyGetWindow
-opencv-python
+opencv-python-headless
 numpy
 pywin32
 requests
-pytest
 winrt-runtime
 winrt-Windows.Foundation
 winrt-Windows.Media.Ocr

@@ -1,177 +1,23 @@
 {
   "profiles": [
     {
-      "label": "3265x1881",
+      "label": "2730x1579",
       "window_ref_physical": {
-        "width": 3265,
-        "height": 1881,
-        "dpr": 1.0
-      },
-      "badge_x_pct": 0.0668,
-      "badge_y_pct": 0.2329,
-      "badge_w_pct": 0.1432,
-      "badge_h_pct": 0.3323,
-      "badge_dx_px": 98,
-      "badge_dy_px": 75,
-      "badge_w_px": 210,
-      "badge_h_px": 107,
-      "row_ref_px": [
-        1466,
-        322
-      ],
-      "calibration_score": 0.8258,
-      "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
-    },
-    {
-      "label": "2420x1855",
-      "window_ref_physical": {
-        "width": 2420,
-        "height": 1855,
+        "width": 2730,
+        "height": 1579,
         "dpr": 1.5
       },
-      "badge_x_pct": 0.0691,
-      "badge_y_pct": 0.2282,
-      "badge_w_pct": 0.1436,
-      "badge_h_pct": 0.332,
-      "badge_dx_px": 75,
-      "badge_dy_px": 55,
-      "badge_w_px": 156,
-      "badge_h_px": 80,
-      "row_ref_px": [
-        1086,
-        241
-      ],
-      "calibration_score": 0.8971,
-      "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
-    },
-    {
-      "label": "2663x2041",
-      "window_ref_physical": {
-        "width": 2663,
-        "height": 2041,
-        "dpr": 1.5
-      },
-      "badge_x_pct": 0.0678,
-      "badge_y_pct": 0.2906,
-      "badge_w_pct": 0.1448,
-      "badge_h_pct": 0.3283,
-      "badge_dx_px": 81,
-      "badge_dy_px": 77,
-      "badge_w_px": 173,
-      "badge_h_px": 87,
-      "row_ref_px": [
-        1195,
-        265
-      ],
-      "calibration_score": 0.8967,
-      "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
-    },
-    {
-      "label": "2377x1381",
-      "window_ref_physical": {
-        "width": 2377,
-        "height": 1381,
-        "dpr": 1.5
-      },
-      "badge_x_pct": 0.0714,
-      "badge_y_pct": 0.2899,
-      "badge_w_pct": 0.1371,
-      "badge_h_pct": 0.2983,
-      "badge_dx_px": 76,
-      "badge_dy_px": 69,
-      "badge_w_px": 146,
-      "badge_h_px": 71,
-      "row_ref_px": [
-        1065,
-        238
-      ],
-      "calibration_score": 1.0,
-      "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
-    },
-    {
-      "label": "2830x1635",
-      "window_ref_physical": {
-        "width": 2830,
-        "height": 1635,
-        "dpr": 1.5
-      },
-      "badge_x_pct": 0.0671,
-      "badge_y_pct": 0.195,
-      "badge_w_pct": 0.1452,
-      "badge_h_pct": 0.3369,
+      "badge_x_pct": 0.0694,
+      "badge_y_pct": 0.2601,
+      "badge_w_pct": 0.1373,
+      "badge_h_pct": 0.3004,
       "badge_dx_px": 85,
-      "badge_dy_px": 55,
-      "badge_w_px": 184,
-      "badge_h_px": 95,
+      "badge_dy_px": 71,
+      "badge_w_px": 168,
+      "badge_h_px": 82,
       "row_ref_px": [
-        1267,
-        282
-      ],
-      "calibration_score": 0.9049,
-      "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
-    },
-    {
-      "label": "3840x2160",
-      "window_ref_physical": {
-        "width": 3840,
-        "height": 2160,
-        "dpr": 1.5
-      },
-      "badge_x_pct": 0.0598,
-      "badge_y_pct": 0.1635,
-      "badge_w_pct": 0.1452,
-      "badge_h_pct": 0.3458,
-      "badge_dx_px": 103,
-      "badge_dy_px": 61,
-      "badge_w_px": 250,
-      "badge_h_px": 129,
-      "row_ref_px": [
-        1722,
-        373
-      ],
-      "calibration_score": 0.7123,
-      "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
-    },
-    {
-      "label": "2034x1187",
-      "window_ref_physical": {
-        "width": 2034,
-        "height": 1187,
-        "dpr": 1.5
-      },
-      "badge_x_pct": 0.069,
-      "badge_y_pct": 0.1594,
-      "badge_w_pct": 0.1446,
-      "badge_h_pct": 0.3237,
-      "badge_dx_px": 63,
-      "badge_dy_px": 33,
-      "badge_w_px": 132,
-      "badge_h_px": 67,
-      "row_ref_px": [
-        913,
-        207
-      ],
-      "calibration_score": 0.8439,
-      "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
-    },
-    {
-      "label": "3193x1840",
-      "window_ref_physical": {
-        "width": 3193,
-        "height": 1840,
-        "dpr": 1.5
-      },
-      "badge_x_pct": 0.0698,
-      "badge_y_pct": 0.2476,
-      "badge_w_pct": 0.1375,
-      "badge_h_pct": 0.3048,
-      "badge_dx_px": 100,
-      "badge_dy_px": 78,
-      "badge_w_px": 197,
-      "badge_h_px": 96,
-      "row_ref_px": [
-        1433,
-        315
+        1224,
+        273
       ],
       "calibration_score": 1.0,
       "note": "Auto-calibrated by auto_calibrate_sold_badge(). Percentages are relative to the row card (width, height). Apply to any row: badge_x = row_x + row_w * badge_x_pct, etc."
