@@ -28,7 +28,9 @@ def test_update_btn_exists(info_tab):
 
 
 def test_update_check_no_requests(info_tab, monkeypatch, qtbot):
-    monkeypatch.setattr(app, "HAVE_REQUESTS", False)
+    import ui.tabs.info as _info_mod
+
+    monkeypatch.setattr(_info_mod, "HAVE_REQUESTS", False)
     info_tab._check_updates()
     qtbot.wait(200)
     assert (
