@@ -25,7 +25,7 @@ def test_initial_values_in_range(settings_tab):
     assert 0.1 <= settings_tab.buy_interval_spin.value() <= 20.0
     assert 0.1 <= settings_tab.post_buy_spin.value() <= 20.0
     assert 0.1 <= settings_tab.reset_interval_spin.value() <= 20.0
-    assert 1 <= settings_tab.scans_spin.value() <= 100000
+    assert 0 <= settings_tab.scans_spin.value() <= 1000000
 
 
 def test_preset_fast_applies_values(settings_tab):

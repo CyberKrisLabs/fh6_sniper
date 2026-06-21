@@ -78,7 +78,7 @@ def load_badge_params(win_w: int | None = None, win_h: int | None = None) -> dic
 # -------------------------
 
 
-def car_available(region, test=False):
+def car_available(region, test=False, full_img=None):
     """
     Check if the 'Auction Options' button is available using image detection.
 
@@ -127,6 +127,14 @@ def car_available(region, test=False):
         # Define base template path for reuse
         base_template = window_utils.resource_path("assets/auction_options_template.png")
 
+        # If the caller passed a shared full-screen grab, crop the button region
+        # from it so this call and find_last_available_row() operate on the same
+        # GPU frame — avoids the DXGI bad-frame inconsistency between two grabs.
+        screenshot = None
+        if full_img is not None and region is not None:
+            rx, ry, rw, rh = region
+            screenshot = full_img.crop((rx, ry, rx + rw, ry + rh))
+
         # If we have manual calibration with saved template info, use it directly
         if manual_region:
             if test:
@@ -160,6 +168,7 @@ def car_available(region, test=False):
                 scale_max=scale_max,
                 scale_steps=scale_steps,
                 test=test,
+                screenshot=screenshot,
             )
             return location is not None
 
@@ -181,6 +190,7 @@ def car_available(region, test=False):
                 scale_max=min(1.5, scale + margin),
                 scale_steps=7,
                 debug=False,
+                screenshot=screenshot,
             )
             return location is not None
         else:
@@ -215,6 +225,7 @@ def car_available(region, test=False):
                 scale_hint=scale_hint_val,
                 hint_margin=0.12,
                 debug=False,
+                screenshot=screenshot,
             )
             return location is not None
     except Exception as e:
@@ -232,6 +243,7 @@ def find_last_available_row(
     badge_params: dict | None,
     sold_template: str,
     log=None,
+    full_img=None,
 ) -> int:
     """Scan all visible rows and return the 0-based index of the LAST available one.
 
@@ -251,12 +263,10 @@ def find_last_available_row(
     """
     last_available = -1
 
-    # Capture the full screen once so every row comes from the same GPU frame.
-    # Per-row grabs each hit the DXGI pipeline independently and can return
-    # different (sometimes wrong) frames; a shared capture means rows are either
-    # all-correct or all-wrong — if bad, all appear empty and the scan stops
-    # safely instead of producing a false "available" on one row.
-    full_img = vision_utils.grab_full_screen()
+    # Use the caller-supplied frame when available so car_available() and this
+    # function share one GPU grab. If not provided, capture one now.
+    if full_img is None:
+        full_img = vision_utils.grab_full_screen()
 
     for idx, row_reg in enumerate(row_regions):
         rx, ry, rw, rh = row_reg
@@ -414,7 +424,8 @@ def buy_sequence(t, full_region=None, stop_event=None, log=None):
         else:
             log("⚠️ Buy result undetermined")
 
-    pyautogui.typewrite(["\n", "esc", "esc", "\n", "\n"], interval=t["reset_interval"])
+    pyautogui.typewrite(["\n", "esc"], interval=t["reset_interval"])
+    reset_search(t, stop_event=stop_event, log=log)
     return result
 
 
@@ -564,14 +575,25 @@ def sniper_loop(
                 break
 
             try:
-                if car_available(region=bottom_left_region):
+                # One shared full-screen grab per scan — car_available() and
+                # find_last_available_row() both use this frame, so a bad DXGI
+                # capture fails consistently (button not found) rather than
+                # car_available seeing the button on one frame and row detection
+                # seeing a dark/empty frame from a second independent grab.
+                shared_frame = vision_utils.grab_full_screen()
+
+                if car_available(region=bottom_left_region, full_img=shared_frame):
                     # Auction button visible — check rows for sold cars before buying
                     win_now = window_utils.get_fh6_window()
                     row_regions = window_utils.get_row_regions(win_now) if win_now else []
 
                     if row_regions and badge_params:
                         available = find_last_available_row(
-                            row_regions, badge_params, sold_template, log=logger_callback
+                            row_regions,
+                            badge_params,
+                            sold_template,
+                            log=logger_callback,
+                            full_img=shared_frame,
                         )
                     else:
                         available = 0  # no row data — attempt buy on current row
@@ -606,18 +628,7 @@ def sniper_loop(
                             stop_event=stop_event,
                             log=logger_callback,
                         )
-                        # After a buy attempt the auction list may still show the
-                        # purchased car as available (server hasn't updated yet).
-                        # reset_search forces a fresh query so the next scan reads
-                        # current server state rather than the pre-buy cached results.
-                        # The extra wait after reset lets the game finish loading
-                        # search results before we scan again — without it the next
-                        # car_available() check can catch the game mid-transition
-                        # (loading screen / search form) and report False, causing
-                        # the sniper to miss cars that are visually available.
                         refreshes += 1
-                        reset_search(timings, stop_event=stop_event, log=logger_callback)
-                        stop_event.wait(timings.get("reset_interval", 0.8))
                         if result is True:
                             successes += 1
                             if buyout_target is not None and successes >= buyout_target:

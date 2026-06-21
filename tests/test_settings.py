@@ -114,7 +114,7 @@ def test_validate_scans_too_low():
 def test_validate_scans_too_high():
     """Test that scans above MAX_SCANS are caught."""
     timings = {"buy_attempt_interval": 0.4, "post_buy_wait": 5.0, "reset_interval": 0.8}
-    is_valid, error_msg, corrected = settings.validate_settings(timings, 150000)
+    is_valid, error_msg, corrected = settings.validate_settings(timings, 1_100_000)
     assert not is_valid
     assert "Number of Scans" in error_msg
     assert corrected["scans"] == settings.MAX_SCANS

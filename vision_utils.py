@@ -281,6 +281,7 @@ def locate_on_screen_with_variants(
     scale_hint: float | None = None,
     hint_margin: float = 0.10,
     test: bool = False,
+    screenshot=None,
 ) -> tuple[int, int, int, int] | None:
     """Attempt to locate a template and its size variants.
 
@@ -332,6 +333,7 @@ def locate_on_screen_with_variants(
             scale_hint=hint,
             hint_margin=hint_margin,
             test=test,
+            screenshot=screenshot,
         )
         if loc is not None:
             return loc
@@ -350,6 +352,7 @@ def locate_on_screen_scaled(
     scale_hint: float | None = None,
     hint_margin: float = 0.10,
     test: bool = False,
+    screenshot=None,
 ) -> tuple[int, int, int, int] | None:
     """Search the screen or region for a template at multiple scales.
 
@@ -362,6 +365,9 @@ def locate_on_screen_scaled(
         scale_max: Maximum scale factor. Should normally be 1.0.
         scale_steps: Number of intermediate scales to try.
         debug: Print detailed information about each scale.
+        screenshot: Pre-captured PIL Image already cropped to `region`. When
+                    provided the grab is skipped entirely — caller is responsible
+                    for ensuring the image matches the region dimensions.
 
     Returns:
         A 4-tuple (left, top, width, height) in screen coordinates if found,
@@ -369,7 +375,10 @@ def locate_on_screen_scaled(
     """
     # take screenshot of region or full screen
     try:
-        if region:
+        if screenshot is not None:
+            left = region[0] if region else 0
+            top = region[1] if region else 0
+        elif region:
             left, top, w, h = region
             screenshot = grab_region(region)
         else:
@@ -737,7 +746,20 @@ def sold_badge_score(
 
     if _winrt_available():
         try:
-            return 1.0 if _sold_badge_ocr(screen_img) else 0.0
+            if _sold_badge_ocr(screen_img):
+                return 1.0
+            # OCR missed on the first frame — badge may still be rendering
+            # (tilted badges are harder to read mid-transition). One 50 ms retry
+            # with a fresh grab before treating the row as not-sold.
+            time.sleep(0.05)
+            try:
+                retry_pil = grab_region((bx, by, bw, bh))
+                retry_bgr = cv2.cvtColor(np.array(retry_pil), cv2.COLOR_RGB2BGR)
+                if _region_is_yellow(retry_bgr) and _sold_badge_ocr(retry_bgr):
+                    return 1.0
+            except Exception:
+                pass
+            return 0.0
         except Exception:
             pass  # fall through to template matching on unexpected OCR failure
 

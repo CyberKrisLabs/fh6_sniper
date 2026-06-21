@@ -32,3 +32,4 @@ mcp_server/
  
 # Local automation scripts
 tools/auto_race.py
+tools/autoshow_autobuy_notowned.py

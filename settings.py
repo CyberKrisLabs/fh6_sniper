@@ -16,8 +16,8 @@ CONFIG_FILE = window_utils.get_config_file()
 # Validation limits
 MIN_INTERVAL = 0.1  # minimum delay between keystrokes
 MAX_INTERVAL = 20.0  # maximum interval to prevent unbearably slow execution
-MIN_SCANS = 1
-MAX_SCANS = 100000
+MIN_SCANS = 0  # 0 means infinite
+MAX_SCANS = 1000000
 
 # All default values
 DEFAULT_CONFIG = {

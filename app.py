@@ -47,7 +47,7 @@ except Exception:
     requests = None
     HAVE_REQUESTS = False
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 _icon_file = window_utils.resource_path("assets/sniper.ico")
 
@@ -650,7 +650,8 @@ class _IngameOverlay(QWidget):
         total = settings.get_scans()
         # Attempts removed from overlay; keep buyout + refresh info
         self._buyout_label.setText(f"Buyout: {successes} success | {failures} failed")
-        self._refresh_label.setText(f"Refreshed: {refreshes}/{total}")
+        total_str = "∞" if total == 0 else str(total)
+        self._refresh_label.setText(f"Refreshed: {refreshes}/{total_str}")
 
     def _update_controls(self) -> None:
         running = getattr(self._sniper_tab, "_sniper_running", False)
@@ -827,15 +828,19 @@ class SniperTab(QWidget):
             f"Buy attempts: {attempts} | Success: {successes}"
             f" | Fail: {failures} | Refreshes: {refreshes}"
         )
-        remaining = max(settings.get_scans() - scans_done, 0)
-        self.scans_label.setText(f"Scans left: {remaining}")
+        total = settings.get_scans()
+        if total == 0:
+            self.scans_label.setText("Scans left: ∞")
+        else:
+            self.scans_label.setText(f"Scans left: {max(total - scans_done, 0)}")
 
     def _refresh_stats_display(self, attempts, successes, failures, refreshes):
         self.stats_label.setText(
             f"Buy attempts: {attempts} | Success: {successes}"
             f" | Fail: {failures} | Refreshes: {refreshes}"
         )
-        self.scans_label.setText(f"Scans left: {settings.get_scans()}")
+        _total = settings.get_scans()
+        self.scans_label.setText("Scans left: ∞" if _total == 0 else f"Scans left: {_total}")
 
     # --- Overlay-triggered calibration wrappers ---------------------------------
     def run_auto_from_overlay(self) -> None:
@@ -1029,7 +1034,7 @@ class SniperTab(QWidget):
         self.stop_btn.setEnabled(True)
 
         region = calibrator.load_region()
-        scans = settings.get_scans()
+        scans = settings.get_scans() or 10_000_000  # 0 = infinite
         timings = settings.load_timings()
         buyout_target = settings.get_buyout_target()
 
@@ -1959,87 +1964,155 @@ class SettingsTab(QWidget):
         self._build_ui()
         self._load_values()
 
+    def _show_scans_info(self):
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Number of Scans")
+        dlg.setText("<b>Number of Scans</b>")
+        dlg.setInformativeText(
+            "How many times the sniper scans the auction listing before stopping. "
+            "Each scan checks all visible car rows and buys any that are available.\n\n"
+            "0 = Infinite: keeps scanning until you stop it manually or "
+            "the Buyout Target is reached.\n\n"
+            "Default is 1000, which is plenty for most sessions."
+        )
+        dlg.setIcon(QMessageBox.Icon.Information)
+        dlg.exec()
+
+    def _show_buyout_info(self):
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Buyout Target")
+        dlg.setText("<b>Buyout Target</b>")
+        dlg.setInformativeText(
+            "Limits how many cars the sniper will buy in one session.\n\n"
+            "Once this many purchases succeed the sniper stops automatically — "
+            "so if you only want 1 or 2 cars it won't keep buying.\n\n"
+            "0 = Infinite: runs until you stop it manually or Number of Scans target is reached.\n"
+            "Range: 0 (Infinite) – 100."
+        )
+        dlg.setIcon(QMessageBox.Icon.Information)
+        dlg.exec()
+
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(10)
 
         root.addWidget(QLabel("<b style='font-size:14pt;'>Settings</b>"))
 
-        explain = QLabel(
-            "Choose a timing preset based on your PC and connection speed, or set custom values.\n"
-            "Start with Mid — it gives reliable detection for most setups. "
-            "Fast timing can cause available cars to be missed at high speed; "
-            "only use it on a high-end PC with a fast connection."
-        )
-        explain.setWordWrap(True)
-        explain.setStyleSheet("font-style: italic;")
-        root.addWidget(explain)
+        # ── 2-column layout ───────────────────────────────────────────────
+        columns_row = QHBoxLayout()
+        columns_row.setSpacing(16)
+        columns_row.setAlignment(Qt.AlignTop)
 
-        # ── Preset selector ───────────────────────────────────────────────
-        preset_row = QHBoxLayout()
-        preset_row.addStretch()
-        preset_row.addWidget(QLabel("<b>Timing Preset:</b>"))
+        # ── Left column: Timing Preset + Timing Values ────────────────────
+        left_col = QVBoxLayout()
+        left_col.setSpacing(8)
+
+        preset_box = QGroupBox("Timing Preset")
+        preset_box_layout = QHBoxLayout(preset_box)
+        preset_box_layout.setContentsMargins(10, 8, 10, 8)
         self.preset_combo = QComboBox()
         self.preset_combo.addItems(["Custom", "Fast", "Mid", "Slow"])
         self.preset_combo.setFixedWidth(120)
+        self.preset_combo.setToolTip(
+            "Mid is recommended for most setups.\n"
+            "Fast may miss cars on slower PCs or connections.\n"
+            "Slow is for high-latency setups."
+        )
         self.preset_combo.currentTextChanged.connect(self._on_preset_change)
-        preset_row.addWidget(self.preset_combo)
-        preset_row.addStretch()
-        root.addLayout(preset_row)
+        preset_box_layout.addWidget(self.preset_combo)
+        preset_box_layout.addStretch()
+        left_col.addWidget(preset_box)
 
-        # ── Numeric fields ────────────────────────────────────────────────
-        form = QGroupBox("Timing Values")
-        form_layout = QVBoxLayout(form)
-
-        self.scans_spin = self._make_int_row(
-            form_layout,
-            "Number of Scans",
-            1,
-            100000,
-            "How many auction listings to scan before stopping.",
-        )
-        self.buyout_target_combo = self._make_combo_row(
-            form_layout,
-            "Buyout Target",
-            ["Infinite"] + [str(i) for i in range(1, 101)],
-            "Stop the sniper after this many successful buyouts. Infinite means no buy target.",
-        )
+        timing_box = QGroupBox("Timing Values")
+        timing_layout = QVBoxLayout(timing_box)
+        timing_layout.setSpacing(6)
         self.buy_interval_spin = self._make_float_row(
-            form_layout,
+            timing_layout,
             "Buy Interval (s)",
             0.1,
             20.0,
             "Delay between keypresses during buy navigation.",
         )
         self.post_buy_spin = self._make_float_row(
-            form_layout,
+            timing_layout,
             "Post Buy Wait (s)",
             0.1,
             20.0,
             "Wait time after a buy attempt for the game to respond.",
         )
         self.reset_interval_spin = self._make_float_row(
-            form_layout,
+            timing_layout,
             "Reset Interval (s)",
             0.1,
             20.0,
             "Delay between keypresses during auction list reset.",
         )
-
         for spin in (self.buy_interval_spin, self.post_buy_spin, self.reset_interval_spin):
             spin.valueChanged.connect(self._on_value_changed)
+        left_col.addWidget(timing_box)
+        left_col.addStretch()
 
-        root.addWidget(form)
+        # ── Right column: Scan Settings ───────────────────────────────────
+        right_col = QVBoxLayout()
+        right_col.setSpacing(8)
 
-        # ── Save button + feedback ────────────────────────────────────────
-        save_row = QHBoxLayout()
-        self.save_btn = QPushButton("Save Settings")
-        self.save_btn.setFixedWidth(140)
-        self.save_btn.clicked.connect(self._save)
-        save_row.addStretch()
-        save_row.addWidget(self.save_btn)
-        save_row.addStretch()
-        root.addLayout(save_row)
+        scan_box = QGroupBox("Scan Settings")
+        scan_layout = QVBoxLayout(scan_box)
+        scan_layout.setSpacing(6)
+        sc_row = QHBoxLayout()
+        sc_lbl = QLabel("Number of Scans")
+        sc_lbl.setFixedWidth(160)
+        self.scans_spin = QSpinBox()
+        self.scans_spin.setRange(0, 1000000)
+        self.scans_spin.setValue(1000)
+        self.scans_spin.setFixedWidth(100)
+        self.scans_spin.setSpecialValueText("Infinite")
+        sc_info_btn = QPushButton("ⓘ")
+        sc_info_btn.setFixedSize(22, 22)
+        sc_info_btn.setFlat(True)
+        sc_info_btn.setStyleSheet(
+            "QPushButton { font-size: 13pt; color: #2196f3; border: none; padding: 0; }"
+            "QPushButton:hover { color: #64b5f6; }"
+        )
+        sc_info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        sc_info_btn.clicked.connect(self._show_scans_info)
+        sc_row.addWidget(sc_lbl)
+        sc_row.addWidget(self.scans_spin)
+        sc_row.addWidget(sc_info_btn)
+        sc_row.addStretch()
+        scan_layout.addLayout(sc_row)
+        bt_row = QHBoxLayout()
+        bt_lbl = QLabel("Buyout Target")
+        bt_lbl.setFixedWidth(160)
+        self.buyout_target_spin = QSpinBox()
+        self.buyout_target_spin.setRange(0, 100)
+        self.buyout_target_spin.setValue(0)
+        self.buyout_target_spin.setFixedWidth(100)
+        self.buyout_target_spin.setSpecialValueText("Infinite")
+        bt_info_btn = QPushButton("ⓘ")
+        bt_info_btn.setFixedSize(22, 22)
+        bt_info_btn.setFlat(True)
+        bt_info_btn.setStyleSheet(
+            "QPushButton { font-size: 13pt; color: #2196f3; border: none; padding: 0; }"
+            "QPushButton:hover { color: #64b5f6; }"
+        )
+        bt_info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        bt_info_btn.clicked.connect(self._show_buyout_info)
+        bt_row.addWidget(bt_lbl)
+        bt_row.addWidget(self.buyout_target_spin)
+        bt_row.addWidget(bt_info_btn)
+        bt_row.addStretch()
+        scan_layout.addLayout(bt_row)
+        self.scans_spin.valueChanged.connect(self._on_value_changed)
+        self.buyout_target_spin.valueChanged.connect(self._on_value_changed)
+        scan_layout.addStretch()
+        right_col.addWidget(scan_box)
+        right_col.addStretch()
+
+        columns_row.addLayout(left_col)
+        columns_row.addLayout(right_col)
+        root.addLayout(columns_row)
 
         self.feedback_label = QLabel("")
         self.feedback_label.setAlignment(Qt.AlignCenter)
@@ -2051,14 +2124,13 @@ class SettingsTab(QWidget):
     def _make_float_row(parent_layout, label: str, mn: float, mx: float, tip: str):
         row = QHBoxLayout()
         lbl = QLabel(label)
-        lbl.setFixedWidth(180)
+        lbl.setFixedWidth(160)
         lbl.setToolTip(tip)
         spin = QDoubleSpinBox()
         spin.setRange(mn, mx)
         spin.setSingleStep(0.001)
         spin.setDecimals(3)
         spin.setFixedWidth(100)
-        row.addStretch()
         row.addWidget(lbl)
         row.addWidget(spin)
         row.addStretch()
@@ -2069,12 +2141,11 @@ class SettingsTab(QWidget):
     def _make_int_row(parent_layout, label: str, mn: int, mx: int, tip: str):
         row = QHBoxLayout()
         lbl = QLabel(label)
-        lbl.setFixedWidth(180)
+        lbl.setFixedWidth(160)
         lbl.setToolTip(tip)
         spin = QSpinBox()
         spin.setRange(mn, mx)
         spin.setFixedWidth(100)
-        row.addStretch()
         row.addWidget(lbl)
         row.addWidget(spin)
         row.addStretch()
@@ -2085,12 +2156,11 @@ class SettingsTab(QWidget):
     def _make_combo_row(parent_layout, label: str, items: list[str], tip: str):
         row = QHBoxLayout()
         lbl = QLabel(label)
-        lbl.setFixedWidth(180)
+        lbl.setFixedWidth(160)
         lbl.setToolTip(tip)
         combo = QComboBox()
         combo.addItems(items)
         combo.setFixedWidth(120)
-        row.addStretch()
         row.addWidget(lbl)
         row.addWidget(combo)
         row.addStretch()
@@ -2100,15 +2170,17 @@ class SettingsTab(QWidget):
     # ── Logic ──────────────────────────────────────────────────────────────
 
     def _load_values(self):
-        timings = settings.load_timings()
-        self.scans_spin.setValue(settings.get_scans())
-        buyout_val = settings.get_buyout_target()
-        self.buyout_target_combo.setCurrentText(
-            "Infinite" if buyout_val is None else str(buyout_val)
-        )
-        self.buy_interval_spin.setValue(timings.get("buy_attempt_interval", 0.6))
-        self.post_buy_spin.setValue(timings.get("post_buy_wait", 5.0))
-        self.reset_interval_spin.setValue(timings.get("reset_interval", 0.9))
+        self._applying_preset = True
+        try:
+            timings = settings.load_timings()
+            self.scans_spin.setValue(settings.get_scans())
+            buyout_val = settings.get_buyout_target()
+            self.buyout_target_spin.setValue(0 if buyout_val is None else buyout_val)
+            self.buy_interval_spin.setValue(timings.get("buy_attempt_interval", 0.6))
+            self.post_buy_spin.setValue(timings.get("post_buy_wait", 5.0))
+            self.reset_interval_spin.setValue(timings.get("reset_interval", 0.9))
+        finally:
+            self._applying_preset = False
         self._detect_preset()
 
     def _detect_preset(self):
@@ -2131,14 +2203,19 @@ class SettingsTab(QWidget):
         if self._applying_preset or name not in PRESETS:
             return
         vals = PRESETS[name]
-        self.buy_interval_spin.setValue(vals["buy_attempt_interval"])
-        self.post_buy_spin.setValue(vals["post_buy_wait"])
-        self.reset_interval_spin.setValue(vals["reset_interval"])
+        self._applying_preset = True
+        try:
+            self.buy_interval_spin.setValue(vals["buy_attempt_interval"])
+            self.post_buy_spin.setValue(vals["post_buy_wait"])
+            self.reset_interval_spin.setValue(vals["reset_interval"])
+        finally:
+            self._applying_preset = False
         self._save(message=f"✅ {name} preset applied and saved")
 
     def _on_value_changed(self):
         if not self._applying_preset:
             self._detect_preset()
+            self._save()
 
     def _save(self, message=None):
         timings = {
@@ -2146,27 +2223,32 @@ class SettingsTab(QWidget):
             "post_buy_wait": self.post_buy_spin.value(),
             "reset_interval": self.reset_interval_spin.value(),
         }
-        combo_text = self.buyout_target_combo.currentText()
-        buyout_target = None if combo_text == "Infinite" else int(combo_text)
+        raw = self.buyout_target_spin.value()
+        buyout_target = None if raw == 0 else raw
         is_valid, error_msg, corrected = settings.save_timings_ui(
             timings,
             self.scans_spin.value(),
             buyout_target,
         )
-        self.scans_spin.setValue(corrected["scans"])
-        self.buy_interval_spin.setValue(corrected["timings"]["buy_attempt_interval"])
-        self.post_buy_spin.setValue(corrected["timings"]["post_buy_wait"])
-        self.reset_interval_spin.setValue(corrected["timings"]["reset_interval"])
+        self._applying_preset = True
+        try:
+            self.scans_spin.setValue(corrected["scans"])
+            self.buy_interval_spin.setValue(corrected["timings"]["buy_attempt_interval"])
+            self.post_buy_spin.setValue(corrected["timings"]["post_buy_wait"])
+            self.reset_interval_spin.setValue(corrected["timings"]["reset_interval"])
+        finally:
+            self._applying_preset = False
         self._sniper_tab.scans_label.setText(f"Scans left: {corrected['scans']}")
         if message:
             self.feedback_label.setText(message)
             self.feedback_label.setStyleSheet("color: #4caf50;")
         elif is_valid:
-            self.feedback_label.setText("✅ Settings saved")
+            self.feedback_label.setText("Settings saved")
             self.feedback_label.setStyleSheet("color: #4caf50;")
         else:
             self.feedback_label.setText(f"⚠️ {error_msg} (auto-corrected and saved)")
             self.feedback_label.setStyleSheet("color: #ff9800;")
+        QTimer.singleShot(2000, lambda: self.feedback_label.setText(""))
 
 
 # ---------------------------------------------------------------------------
@@ -2283,35 +2365,302 @@ class GuidesTab(QWidget):
         super().__init__(parent)
         self._build_ui()
 
-    def _build_ui(self):
-        scroll = QScrollArea(self)
+    # ── helpers shared by all sub-tabs ────────────────────────────────────
+
+    @staticmethod
+    def _make_scroll_page() -> tuple["QScrollArea", "QVBoxLayout"]:
+        """Return a (scroll_area, root_layout) pair ready to populate."""
+        scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         container = QWidget()
         root = QVBoxLayout(container)
         root.setContentsMargins(20, 16, 20, 24)
         root.setSpacing(6)
+        scroll.setWidget(container)
+        return scroll, root
 
+    @staticmethod
+    def _add_section(root: "QVBoxLayout", title: str) -> None:
+        if root.count():
+            root.addSpacing(10)
+        lbl = QLabel(f"<b style='font-size:13pt;'>{title}</b>")
+        root.addWidget(lbl)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("QFrame { color: #555; }")
+        root.addWidget(sep)
+
+    @staticmethod
+    def _add_para(root: "QVBoxLayout", text: str, color: str = "#ccc") -> None:
+        lbl = QLabel(text)
+        lbl.setWordWrap(True)
+        lbl.setStyleSheet(f"font-size:10pt; color:{color}; padding-top:4px;")
+        lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        root.addWidget(lbl)
+
+    @staticmethod
+    def _add_subhead(root: "QVBoxLayout", text: str) -> None:
+        lbl = QLabel(f"<b style='font-size:10pt; color:#aaddff;'>{text}</b>")
+        lbl.setStyleSheet("padding-top:8px;")
+        root.addWidget(lbl)
+
+    @staticmethod
+    def _add_image(root: "QVBoxLayout", img_name: str, max_w: int = 620) -> None:
+        """Add a standalone image (no step number or body text)."""
+        img_path = window_utils.resource_path(f"assets/guide/{img_name}")
+        if not os.path.isfile(img_path):
+            return
+        pix = QPixmap(img_path)
+        if pix.isNull():
+            return
+        if pix.width() > max_w:
+            pix = pix.scaledToWidth(max_w, Qt.TransformationMode.SmoothTransformation)
+        lbl = QLabel()
+        lbl.setPixmap(pix)
+        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setStyleSheet("margin-top: 6px; margin-bottom: 4px;")
+        root.addWidget(lbl)
+
+    @staticmethod
+    def _add_step(
+        root: "QVBoxLayout",
+        number: int,
+        title: str,
+        body: str,
+        img_name: "str | list[str] | None" = None,
+    ) -> None:
+        root.addSpacing(12)
+        heading = QLabel(f"<b style='font-size:12pt;'>Step {number} — {title}</b>")
+        root.addWidget(heading)
+        # One image or a list of images stacked vertically
+        names = [] if img_name is None else ([img_name] if isinstance(img_name, str) else img_name)
+        for name in names:
+            img_path = window_utils.resource_path(f"assets/guide/{name}")
+            if os.path.isfile(img_path):
+                pix = QPixmap(img_path)
+                if not pix.isNull():
+                    max_w = 620
+                    if pix.width() > max_w:
+                        pix = pix.scaledToWidth(max_w, Qt.TransformationMode.SmoothTransformation)
+                    img_lbl = QLabel()
+                    img_lbl.setPixmap(pix)
+                    img_lbl.setAlignment(Qt.AlignCenter)
+                    img_lbl.setStyleSheet("margin-top: 6px; margin-bottom: 4px;")
+                    root.addWidget(img_lbl)
+        if body:
+            body_lbl = QLabel(body)
+            body_lbl.setWordWrap(True)
+            body_lbl.setStyleSheet("font-size:10pt; color:#ccc; padding-top:4px;")
+            root.addWidget(body_lbl)
+
+    # ── tab builders ─────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        tabs = QTabWidget()
+        outer.addWidget(tabs)
+
+        # Tab 1 — Set Up the Sniper
+        setup_page, setup_root = self._make_scroll_page()
+        self._populate_setup_tab(setup_root)
+        tabs.addTab(setup_page, "Set Up the Sniper")
+
+        # Tab 2 — Starting the Sniper
+        start_page, start_root = self._make_scroll_page()
+        self._populate_starting_tab(start_root)
+        tabs.addTab(start_page, "Starting the Sniper")
+
+        # Tab 3 — Reference (existing guide content)
+        ref_page, ref_root = self._make_scroll_page()
+        self._populate_reference_tab(ref_root)
+        tabs.addTab(ref_page, "General")
+
+    def _populate_setup_tab(self, root: "QVBoxLayout") -> None:
+        # ── Row Tuner ─────────────────────────────────────────────────────
+        self._add_section(root, "Row Tuner")
+        self._add_para(
+            root,
+            "The sniper watches 4 row regions on screen for available cars and sold badges. "
+            "You need to align these rows to match your game's auction listing.",
+        )
+        row_warn = QLabel(
+            "⚠  Run the Row Tuner on first setup, and again whenever you change your "
+            "game resolution or Windows display scaling — the row positions will shift "
+            "and need to be realigned."
+        )
+        row_warn.setWordWrap(True)
+        row_warn.setStyleSheet("font-size:10pt; color:#f44336; padding: 6px 0px 2px 0px;")
+        root.addWidget(row_warn)
+
+        self._add_step(
+            root,
+            1,
+            "Open Row Tuner",
+            "Go to the Calibration tab in FH6 Sniper and click Open Row Tuner.",
+            "row_calibration.png",
+        )
+        self._add_step(
+            root,
+            2,
+            "Check Default Row Positions",
+            "Four coloured border rows will appear showing their default positions. "
+            "If they already line up with the auction rows in the game you can skip "
+            "adjustment and just close the Row Tuner.",
+            "default_settings.png",
+        )
+        self._add_step(
+            root,
+            3,
+            "Adjust Row 1 and Copy to All Rows",
+            "Select Row 1 and adjust its size and position until it matches the first "
+            "auction card in the game. Once Row 1 is correct, click Copy to all rows — "
+            "this resizes all other rows to match. Then click each remaining row and "
+            "move it into position.",
+            "adjust_rows.png",
+        )
+        self._add_step(
+            root,
+            4,
+            "Save and Close",
+            "When all rows are lined up with the auction cards, click Save all rows and "
+            "close the Row Tuner.\n\n"
+            "Note: row profiles are saved per resolution and display scaling. If you "
+            "significantly change your resolution or Windows display scale you will get "
+            "a new profile — that is why the Calibration tab shows a profile count.",
+            ["adjusted_rows.png", "save_rows.png"],
+        )
+
+        # ── Detection Calibration ─────────────────────────────────────────
+        self._add_section(root, "Detection Calibration")
+        self._add_para(
+            root,
+            "The sniper needs to know where the Auction Options button and the Sold badge "
+            "are on your screen. Run Auto Calibration first — fall back to Manual only if "
+            "auto fails.",
+        )
+        warn_lbl = QLabel(
+            "⚠  Re-run calibration every time you start Forza Horizon 6. "
+            "If you always play in fullscreen the position should stay the same, but "
+            "if you use windowed mode and resize or move the window the calibration "
+            "will be off and needs to be redone."
+        )
+        warn_lbl.setWordWrap(True)
+        warn_lbl.setStyleSheet("font-size:10pt; color:#f44336; padding: 6px 0px 2px 0px;")
+        root.addWidget(warn_lbl)
+        self._add_image(root, "detection_calibration.png")
+
+        # Auto Calibration
+        self._add_subhead(root, "Auto Calibration")
+
+        self._add_step(
+            root,
+            1,
+            "Search for Available Cars",
+            "Use the auction filter to search for any available car — this is the fastest "
+            "way to get cars with a Sold badge showing in the listing.",
+            "auction_filter_sold.png",
+        )
+        self._add_step(
+            root,
+            2,
+            "Wait for a Sold Car",
+            "Once cars appear, wait until at least one row shows a car marked as Sold. "
+            "The sold car can be on any of the 4 rows.",
+            "list_with_sold_car.png",
+        )
+        self._add_step(
+            root,
+            3,
+            "Run Auto Calibration",
+            "Click Run Auto Calibration in the Calibration tab, or use the Auto Calibrate "
+            "button in the in-game overlay (toggle it from the Sniper tab). You have "
+            "5 seconds — make sure the FH6 window is fully visible so both the Auction "
+            "Options button and the Sold badge are on screen. Let the calibrator finish.",
+        )
+        self._add_step(
+            root,
+            4,
+            "Confirm Calibration Succeeded",
+            "Check the calibration status in the app. You can test both the auction "
+            "button and sold badge detection using the test buttons at the bottom of the "
+            "Calibration tab — make sure the FH6 window is not covered by the sniper app "
+            "when clicking them.",
+            "auto_calibration_success.png",
+        )
+
+        # Manual Calibration
+        self._add_subhead(root, "Manual Calibration")
+
+        self._add_step(
+            root,
+            1,
+            "Calibrate Manually",
+            "If Auto Calibration fails, switch to the Manual Calibration tab. You need to "
+            "calibrate the Auction Options button and the Sold badge separately. Follow "
+            "the on-screen countdown — hover your mouse over the top-left corner of the "
+            "button or badge, wait, then move to the bottom-right corner and wait again. "
+            "Once done, test both detections using the buttons at the bottom of the "
+            "Calibration tab the same way as described in the Auto Calibration steps above.",
+            "manual_calibration.png",
+        )
+
+        root.addStretch()
+
+    def _populate_starting_tab(self, root: "QVBoxLayout") -> None:
+        intro = QLabel(
+            "Follow these steps to get to the right place in Forza Horizon 6 "
+            "before starting the sniper."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet("font-size:10pt; color:#ccc;")
+        root.addWidget(intro)
+
+        self._add_step(
+            root,
+            1,
+            "Navigate to the Auction House",
+            "Open the Festival menu and go to the Buy & Sell tab, then select Auction House.",
+            "auction_house.png",
+        )
+        self._add_step(
+            root,
+            2,
+            "Open Search Auctions",
+            "Click Search Auctions to open the full auction browser.",
+            "search_auctions.png",
+        )
+        self._add_step(
+            root,
+            3,
+            "Set Up Your Filters",
+            "Use the auction filters to find the car you want. Make sure to set the maximum "
+            "buyout price — the sniper will only attempt to buy cars at or below this price.",
+            "auction_filter.png",
+        )
+        self._add_step(
+            root,
+            4,
+            "Start the Sniper",
+            "This is the screen you should be on when you click Start Sniper in the app. "
+            "The sniper will continuously refresh the listing and automatically attempt to "
+            "buy any available car it finds.",
+            "start.png",
+        )
+
+        root.addStretch()
+
+    def _populate_reference_tab(self, root: "QVBoxLayout") -> None:
         def _section(title: str) -> None:
-            if root.count():
-                root.addSpacing(10)
-            lbl = QLabel(f"<b style='font-size:13pt;'>{title}</b>")
-            root.addWidget(lbl)
-            sep = QFrame()
-            sep.setFrameShape(QFrame.Shape.HLine)
-            sep.setStyleSheet("QFrame { color: #555; }")
-            root.addWidget(sep)
+            self._add_section(root, title)
 
         def _para(text: str, color: str = "#ccc") -> None:
-            lbl = QLabel(text)
-            lbl.setWordWrap(True)
-            lbl.setStyleSheet(f"font-size:10pt; color:{color}; padding-top:4px;")
-            lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            root.addWidget(lbl)
+            self._add_para(root, text, color)
 
         def _subhead(text: str) -> None:
-            lbl = QLabel(f"<b style='font-size:10pt; color:#aaddff;'>{text}</b>")
-            lbl.setStyleSheet("padding-top:8px;")
-            root.addWidget(lbl)
+            self._add_subhead(root, text)
 
         # ── Requirements ─────────────────────────────────────────────
         _section("Requirements")
@@ -2382,10 +2731,11 @@ class GuidesTab(QWidget):
 
         _subhead("Timing Presets")
         _para(
-            "Timing controls how fast keystrokes are sent during buy attempts and auction resets.\n\n"
+            "Timing controls how fast keystrokes are sent during buy attempts and "
+            "auction resets.\n\n"
             "Mid  —  recommended starting point. Reliable detection for most setups.\n"
-            "Fast  —  aggressive timing; may cause available cars to be missed at high speed. "
-            "Only try this once Mid is working well and you want more speed.\n"
+            "Fast  —  aggressive timing; may cause available cars to be missed at high "
+            "speed. Only try this once Mid is working well and you want more speed.\n"
             "Slow  —  for slower PCs or laggy connections.\n\n"
             "If available cars are being missed, switch to Mid or Slow and re-run calibration."
         )
@@ -2393,15 +2743,13 @@ class GuidesTab(QWidget):
         _subhead("Number of Scans")
         _para(
             "How many auction listings the sniper will scan before stopping automatically. "
-            "Set this high (or leave at the default) for a long session, or low for a quick "
-            "targeted run."
+            "0 = Infinite. Set to 0 or leave at the default (1000) for a long session."
         )
 
         _subhead("Buyout Target")
         _para(
-            "How many successful car purchases to make before the sniper stops automatically. "
-            "Set to Infinite to keep running until you stop it manually or the Number of Scans "
-            "is reached, or pick a specific number if you only want to buy a fixed amount of cars."
+            "How many successful purchases to make before stopping automatically. "
+            "0 = Infinite. Set a number if you only want to buy a fixed amount of cars."
         )
 
         # ── Buyout Attempt Detection ──────────────────────────────────
@@ -2418,11 +2766,11 @@ class GuidesTab(QWidget):
         # ── In-game Overlay ───────────────────────────────────────────
         _section("In-game Overlay")
         _para(
-            "Toggle the overlay from the Sniper tab. It floats above the FH6 window and lets "
-            "you start/stop the sniper, trigger calibration, and open the Row Tuner "
+            "Toggle the overlay from the Sniper tab. It floats above the FH6 window and "
+            "lets you start/stop the sniper, trigger calibration, and open the Row Tuner "
             "without alt-tabbing.\n\n"
-            "The overlay auto-hides when FH6 loses focus and reappears when it's active again. "
-            "Click Hide or uncheck the toggle to close it permanently."
+            "The overlay auto-hides when FH6 loses focus and reappears when it's active "
+            "again. Click Hide or uncheck the toggle to close it permanently."
         )
 
         # ── Tips ──────────────────────────────────────────────────────
@@ -2438,11 +2786,6 @@ class GuidesTab(QWidget):
         )
 
         root.addStretch()
-        scroll.setWidget(container)
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(scroll)
 
 
 # ---------------------------------------------------------------------------
