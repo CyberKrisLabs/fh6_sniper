@@ -1,10 +1,11 @@
 """Row fine-tuning tool for FH6 auction list.
 
 Shows all 4 rows with coloured borders plus the "Sold!" badge scan region
-inside each one.  Select a row with 1-4 keys (or the row buttons) then:
+inside each one.  Tick one or more rows with the 1-4 keys or row buttons
+(press/click again to untick) then:
 
-  Arrow keys          - move selected row (X / Y)
-  Shift + Arrow keys  - resize selected row (width / height)
+  Arrow keys          - move all ticked rows together (X / Y)
+  Shift + Arrow keys  - resize all ticked rows together (width / height)
   Nudge buttons       - same in 1 px or 10 px steps
 
 Saves per-row (x_pct, y_pct, w_pct, h_pct) relative to the logical window
@@ -131,18 +132,18 @@ class TuneOverlay(QWidget):
         self.setGeometry(QApplication.primaryScreen().geometry())
         self._rows: list[tuple[int, int, int, int]] = []
         self._badge: dict | None = None
-        self._sel: int = 0
+        self._selected: set[int] = set()
         self.show()
 
     def set_state(
         self,
         rows: list[tuple[int, int, int, int]],
         badge: dict | None,
-        sel: int,
+        selected: set[int],
     ) -> None:
         self._rows = rows
         self._badge = badge
-        self._sel = sel
+        self._selected = selected
         self.update()
 
     def paintEvent(self, _event) -> None:
@@ -152,22 +153,46 @@ class TuneOverlay(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         for i, (rx, ry, rw, rh) in enumerate(self._rows):
-            is_sel = i == self._sel
+            is_sel = i in self._selected
             base = ROW_COLORS[i % len(ROW_COLORS)]
 
+            # Boundary is always a constant 2px line so it stays pixel-aligned
+            # with the calibrated region regardless of selection — thickening
+            # it to show "selected" would eat into the exact edge it's meant
+            # to indicate, making fine alignment harder to judge.
             c = QColor(base)
             c.setAlpha(SEL_ALPHA if is_sel else 160)
             pen = QPen(c)
-            pen.setWidth(4 if is_sel else 2)
+            pen.setWidth(2)
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(rx, ry, rw, rh)
 
+            if is_sel:
+                # Selection indicator: corner brackets drawn *outside* the
+                # rectangle so they never overlap (and thus never obscure)
+                # the boundary line itself.
+                bracket_pen = QPen(c)
+                bracket_pen.setWidth(3)
+                painter.setPen(bracket_pen)
+                gap = 5
+                arm = max(8, min(20, rw // 6, rh // 6))
+                for cx, cy, dx, dy in (
+                    (rx - gap, ry - gap, 1, 1),  # top-left
+                    (rx + rw + gap, ry - gap, -1, 1),  # top-right
+                    (rx - gap, ry + rh + gap, 1, -1),  # bottom-left
+                    (rx + rw + gap, ry + rh + gap, -1, -1),  # bottom-right
+                ):
+                    painter.drawLine(cx, cy, cx + dx * arm, cy)
+                    painter.drawLine(cx, cy, cx, cy + dy * arm)
+
             lc = QColor(c)
             lc.setAlpha(255)
+            font = painter.font()
+            font.setBold(is_sel)
+            painter.setFont(font)
             painter.setPen(lc)
-            label = f"Row {i + 1}" if not is_sel else f"Row {i + 1}"
-            painter.drawText(rx + 6, ry + 20, label)
+            painter.drawText(rx + 6, ry + 20, f"Row {i + 1}")
 
             if self._badge:
                 bx, by, bw, bh = vision_utils.badge_scan_region((rx, ry, rw, rh), self._badge)
@@ -193,7 +218,7 @@ class ControlPanel(QWidget):
         super().__init__(None, Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setWindowTitle("Row Fine-Tuning")
         self._overlay = overlay
-        self._sel = 0
+        self._selected: set[int] = set()
         self._adjs: list[list[int]] = [[0, 0, 0, 0] for _ in range(NUM_ROWS)]
         self._base: list[tuple[int, int, int, int]] = []
         self._win_phys: tuple[int, int, int, int] | None = None
@@ -222,7 +247,7 @@ class ControlPanel(QWidget):
         root.addWidget(self.win_label)
 
         # ── Row selector ──────────────────────────────────────────────
-        sel_box = QGroupBox("Select Row  (keys 1 – 4)")
+        sel_box = QGroupBox("Select Row(s)  (keys 1 – 4, click to tick/untick)")
         sel_layout = QHBoxLayout(sel_box)
         sel_layout.setContentsMargins(6, 4, 6, 6)
         sel_layout.setSpacing(6)
@@ -240,7 +265,7 @@ class ControlPanel(QWidget):
                 f"QPushButton:hover:!checked {{"
                 f" background: rgba({c.red()},{c.green()},{c.blue()},60); }}"
             )
-            btn.clicked.connect(lambda _, idx=i: self._select(idx))
+            btn.toggled.connect(lambda checked, idx=i: self._set_row_selected(idx, checked))
             sel_layout.addWidget(btn)
             self._sel_btns.append(btn)
         sel_layout.addStretch()
@@ -368,16 +393,16 @@ class ControlPanel(QWidget):
         root.addWidget(sec_sep)
 
         sec_row = QHBoxLayout()
-        self.reset_row_btn = QPushButton("Reset this row")
-        self.reset_row_btn.setToolTip("Reset selected row to formula defaults")
+        self.reset_row_btn = QPushButton("Reset ticked row(s)")
+        self.reset_row_btn.setToolTip("Reset all ticked rows to formula defaults")
         self.reset_row_btn.setStyleSheet(
             "QPushButton { background:#3a3a3a; border-radius:4px; padding:4px 10px; }"
             "QPushButton:hover { background:#4a4a4a; }"
         )
-        self.reset_row_btn.clicked.connect(self._reset_row)
+        self.reset_row_btn.clicked.connect(self._reset_selected)
 
         self.copy_btn = QPushButton("Copy to all rows")
-        self.copy_btn.setToolTip("Apply selected row's adjustments to all rows")
+        self.copy_btn.setToolTip("Apply the lowest-numbered ticked row's adjustments to all rows")
         self.copy_btn.setStyleSheet(
             "QPushButton { background:#3a3a3a; border-radius:4px; padding:4px 10px; }"
             "QPushButton:hover { background:#4a4a4a; }"
@@ -408,19 +433,20 @@ class ControlPanel(QWidget):
         root.addWidget(self.status_label)
 
         self.setFixedWidth(520)
-        self._select(0)
+        self._sel_btns[0].setChecked(True)
 
-    def _select(self, idx: int) -> None:
-        self._sel = idx
-        for i, btn in enumerate(self._sel_btns):
-            btn.setChecked(i == idx)
+    def _set_row_selected(self, idx: int, checked: bool) -> None:
+        if checked:
+            self._selected.add(idx)
+        else:
+            self._selected.discard(idx)
 
     def keyPressEvent(self, event) -> None:
         key = event.key()
         shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
 
         if Qt.Key.Key_1 <= key <= Qt.Key.Key_4:
-            self._select(key - Qt.Key.Key_1)
+            self._sel_btns[key - Qt.Key.Key_1].toggle()
             return
 
         if key == Qt.Key.Key_Left:
@@ -433,21 +459,25 @@ class ControlPanel(QWidget):
             self._adj(dh=1) if shift else self._adj(dy=1)
 
     def _adj(self, dx: int = 0, dy: int = 0, dw: int = 0, dh: int = 0) -> None:
-        a = self._adjs[self._sel]
-        a[0] += dx
-        a[1] += dy
-        a[2] += dw
-        if self._base:
-            _, _, _, base_h = self._base[self._sel]
-            a[3] = max(10 - base_h, a[3] + dh)
-        else:
-            a[3] += dh
+        for idx in self._selected:
+            a = self._adjs[idx]
+            a[0] += dx
+            a[1] += dy
+            a[2] += dw
+            if self._base:
+                _, _, _, base_h = self._base[idx]
+                a[3] = max(10 - base_h, a[3] + dh)
+            else:
+                a[3] += dh
 
-    def _reset_row(self) -> None:
-        self._adjs[self._sel] = [0, 0, 0, 0]
+    def _reset_selected(self) -> None:
+        for idx in self._selected:
+            self._adjs[idx] = [0, 0, 0, 0]
 
     def _copy_to_all(self) -> None:
-        src = list(self._adjs[self._sel])
+        if not self._selected:
+            return
+        src = list(self._adjs[min(self._selected)])
         for i in range(NUM_ROWS):
             self._adjs[i] = list(src)
 
@@ -464,7 +494,7 @@ class ControlPanel(QWidget):
         win = window_utils.get_fh6_window()
         if not win:
             self.win_label.setText("FH6: NOT FOUND - open the game")
-            self._overlay.set_state([], self._badge, self._sel)
+            self._overlay.set_state([], self._badge, self._selected)
             return
 
         dpr = _dpr()
@@ -496,25 +526,32 @@ class ControlPanel(QWidget):
             del self._pending_tuned
 
         rows = self._current_rows()
-        self._overlay.set_state(rows, self._badge, self._sel)
+        self._overlay.set_state(rows, self._badge, self._selected)
 
         if rows:
-            rx, ry, rw, rh = rows[self._sel]
-            bx, by, bw, bh = self._base[self._sel]
-            wx, wy, ww, wh = self._win_phys
-            dx, dy, dw, dh = self._adjs[self._sel]
-            ww_log = ww / dpr
-            wh_log = wh / dpr
-            x_pct = (rx - wx / dpr) / ww_log if ww_log else 0
-            y_pct = (ry - wy / dpr) / wh_log if wh_log else 0
-            w_pct = rw / ww_log if ww_log else 0
-            h_pct = rh / wh_log if wh_log else 0
-            self.row_info.setText(
-                f"Row {self._sel + 1}:  ({rx},{ry})  {rw}x{rh} px\n"
-                f"  adj: dx={dx:+d} dy={dy:+d} dw={dw:+d} dh={dh:+d}\n"
-                f"  pct: x={x_pct * 100:.2f}%  y={y_pct * 100:.2f}%  "
-                f"w={w_pct * 100:.2f}%  h={h_pct * 100:.2f}%"
-            )
+            if not self._selected:
+                self.row_info.setText(
+                    "No row ticked — tick one or more row buttons above to select them."
+                )
+            else:
+                wx, wy, ww, wh = self._win_phys
+                ww_log = ww / dpr
+                wh_log = wh / dpr
+                blocks = []
+                for idx in sorted(self._selected):
+                    rx, ry, rw, rh = rows[idx]
+                    dx, dy, dw, dh = self._adjs[idx]
+                    x_pct = (rx - wx / dpr) / ww_log if ww_log else 0
+                    y_pct = (ry - wy / dpr) / wh_log if wh_log else 0
+                    w_pct = rw / ww_log if ww_log else 0
+                    h_pct = rh / wh_log if wh_log else 0
+                    blocks.append(
+                        f"Row {idx + 1}:  ({rx},{ry})  {rw}x{rh} px\n"
+                        f"  adj: dx={dx:+d} dy={dy:+d} dw={dw:+d} dh={dh:+d}\n"
+                        f"  pct: x={x_pct * 100:.2f}%  y={y_pct * 100:.2f}%  "
+                        f"w={w_pct * 100:.2f}%  h={h_pct * 100:.2f}%"
+                    )
+                self.row_info.setText("\n".join(blocks))
 
     def _save(self) -> None:
         if not self._base or not self._win_phys:

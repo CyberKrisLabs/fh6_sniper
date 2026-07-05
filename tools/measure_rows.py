@@ -12,6 +12,7 @@ import json
 import os
 import signal
 import sys
+from typing import Any
 
 import pyautogui
 from PySide6.QtCore import Qt, QTimer
@@ -229,7 +230,7 @@ class MeasureTool(QWidget):
         # Unpack 8 points: (tl, br) per row
         pairs = [(self._points[i * 2], self._points[i * 2 + 1]) for i in range(4)]
 
-        result = {
+        result: dict[str, Any] = {
             "window": {"x": wx, "y": wy, "width": ww, "height": wh},
             "rows": [],
             "gaps": [],

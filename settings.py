@@ -19,23 +19,27 @@ MAX_INTERVAL = 20.0  # maximum interval to prevent unbearably slow execution
 MIN_SCANS = 0  # 0 means infinite
 MAX_SCANS = 1000000
 
+DEFAULT_TIMINGS: dict[str, float] = {
+    "buy_attempt_interval": 0.6,
+    "post_buy_wait": 5.0,
+    "reset_interval": 0.9,
+}
+
 # All default values
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict[str, object] = {
     "scans": 1000,  # previously 'attempts'
     "buyout_target": None,
-    "TIMINGS": {
-        "buy_attempt_interval": 0.6,
-        "post_buy_wait": 5.0,
-        "reset_interval": 0.9,
-    },
+    "TIMINGS": DEFAULT_TIMINGS,
     # whether to skip the popup warning about missing manual calibration
     "SKIP_CALIBRATION_WARNING": False,
     # whether to skip the recalibration reminder on first sniper start
     "SKIP_RECALIBRATION_REMINDER": False,
+    # whether FH6's "Moving Backgrounds" accessibility setting is turned off —
+    # the Auction Options button gets a plain white background instead of the
+    # default animated one, so a different template set is needed
+    "MOVING_BACKGROUND_OFF": False,
     # AUCTION_OPTIONS_REGION is optional (only set via manual calibration)
 }
-
-DEFAULT_TIMINGS = DEFAULT_CONFIG["TIMINGS"].copy()
 
 
 def validate_settings(timings_dict, scans_value, buyout_target=None):
@@ -223,4 +227,17 @@ def set_skip_recalibration_reminder(value: bool):
     """Persist the user's choice about the recalibration reminder."""
     config = load_config()
     config["SKIP_RECALIBRATION_REMINDER"] = bool(value)
+    save_config(config)
+
+
+def get_moving_background_off():
+    """Return True if FH6's Moving Backgrounds accessibility setting is off."""
+    config = load_config()
+    return config.get("MOVING_BACKGROUND_OFF", False)
+
+
+def set_moving_background_off(value: bool):
+    """Persist whether FH6's Moving Backgrounds accessibility setting is off."""
+    config = load_config()
+    config["MOVING_BACKGROUND_OFF"] = bool(value)
     save_config(config)

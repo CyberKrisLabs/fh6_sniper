@@ -163,7 +163,11 @@ class GuidesTab(QWidget):
             "Select Row 1 and adjust its size and position until it matches the first "
             "auction card in the game. Once Row 1 is correct, click Copy to all rows — "
             "this resizes all other rows to match. Then click each remaining row and "
-            "move it into position.",
+            "move it into position.\n\n"
+            "Tip: row buttons are tick boxes — you can tick more than one row at a time "
+            "(click several, or press their number keys) so arrow keys and the "
+            "move/resize buttons act on all ticked rows together. Handy once rows are "
+            "roughly aligned and just need the same small nudge.",
             "adjust_rows.png",
         )
         self._add_step(
@@ -184,6 +188,13 @@ class GuidesTab(QWidget):
             "The sniper needs to know where the Auction Options button and the Sold badge "
             "are on your screen. Run Auto Calibration first — fall back to Manual only if "
             "auto fails.",
+        )
+        self._add_para(
+            root,
+            "ℹ  If you've turned off FH6's 'Moving Backgrounds' accessibility setting, "
+            "tick Moving Background OFF on the Settings tab first — the Auction Options "
+            "button looks different without it and calibration won't find it otherwise.",
+            color="#64b5f6",
         )
         warn_lbl = QLabel(
             "⚠  Re-run calibration every time you start Forza Horizon 6. "
@@ -333,9 +344,11 @@ class GuidesTab(QWidget):
             "The sniper watches 4 row regions for sold badges and available cars. "
             "At different resolutions or display-scaling levels the formula estimate may not "
             "line up perfectly with the actual cards.\n\n"
-            "Open the Row Tuner, select a row with the numbered buttons (or keys 1–4), "
+            "Open the Row Tuner, tick a row with the numbered buttons (or keys 1–4), "
             "then use the right panel to move the row up/down/left/right and the left panel "
             "to resize it until the coloured overlay box sits on the auction card. "
+            "You can tick multiple rows at once to move or resize them together — handy "
+            "once rows are roughly aligned and only need a shared nudge. "
             "Use Copy to all rows once the first row is correct, then fine-tune the rest. "
             "Hit Save — profiles are stored per resolution so rows stay correct after "
             "resolution changes."
@@ -390,6 +403,15 @@ class GuidesTab(QWidget):
             "0 = Infinite. Set a number if you only want to buy a fixed amount of cars."
         )
 
+        _subhead("Moving Background OFF")
+        _para(
+            "Only relevant if you've turned off FH6's 'Moving Backgrounds' accessibility "
+            "setting. With it off, the Auction Options button has a plain white background "
+            "instead of the default animated one, which needs a different template to "
+            "detect. Tick this box to match, then re-run Auto Calibration — it affects "
+            "both Auto Calibration and the live sniper."
+        )
+
         _section("Buyout Attempt Detection")
         _para(
             "After each buyout attempt the sniper waits and tries to detect whether the "
@@ -416,6 +438,9 @@ class GuidesTab(QWidget):
             "• Only one calibration type (Auto or Manual) can be active at a time. "
             "Remove the current one before switching.\n"
             "• If the sniper stops detecting after a game update, re-run Auto Calibration.\n"
+            "• If Auto Calibration can't find the Auction Options button but it's clearly "
+            "visible, check whether you've disabled Moving Backgrounds in FH6 — tick "
+            "Moving Background OFF in Settings and re-run calibration.\n"
             "• Config is saved at  %APPDATA%\\FH6Sniper\\config.json\n"
             "• Logs are shown in the Status Log panel on the Sniper tab."
         )

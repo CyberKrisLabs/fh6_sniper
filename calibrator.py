@@ -12,6 +12,7 @@ import time
 
 import pyautogui
 
+import settings
 import window_utils
 
 CONFIG_FILE = window_utils.get_config_file()
@@ -333,21 +334,179 @@ def select_sold_badge_template(win=None) -> str:
     return base
 
 
-def auto_calibrate_sold_badge(status_label=None) -> dict | None:
-    """Detect the sold badge position by scanning visible auction rows.
+def _find_badge_via_ocr(row_regions, full_img, search_x_fraction, _status) -> dict | None:
+    """OCR path: find yellow blobs in each row, read their text.
 
-    When Windows OCR is available (winrt packages installed), finds yellow blobs
-    in each row and reads their text — the blob that says "SOLD" is the badge.
-    Falls back to template matching when OCR is unavailable.
-
-    Returns the saved dict, or None if no badge was found.
-    Call this while a sold car is visible in the auction list.
+    The blob that contains "SOLD" (but not "NOT SOLD") is the badge.
     """
     import asyncio
 
     import cv2
     import numpy as np
 
+    import vision_utils
+
+    _status("Scanning auction rows for SOLD badge (OCR)…")
+
+    for row_idx, (rx, ry, rw, rh) in enumerate(row_regions):
+        search_w = int(rw * search_x_fraction)
+        row_pil = full_img.crop((rx, ry, rx + search_w, ry + rh))
+        row_bgr = cv2.cvtColor(np.array(row_pil), cv2.COLOR_RGB2BGR)
+
+        # Find yellow blobs — the sold badge is a distinct yellow rectangle.
+        hsv = cv2.cvtColor(row_bgr, cv2.COLOR_BGR2HSV)
+        yellow_mask = cv2.inRange(hsv, np.array([24, 100, 100]), np.array([38, 255, 255]))
+        contours, _ = cv2.findContours(yellow_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            continue
+
+        # Try each yellow blob, largest first.
+        for contour in sorted(contours, key=cv2.contourArea, reverse=True):
+            if cv2.contourArea(contour) < search_w * rh * 0.005:
+                break  # remaining blobs are too small to be a badge
+            bx, by, bw, bh_badge = cv2.boundingRect(contour)
+            pad = max(4, int(rh * 0.05))
+            crop = row_bgr[
+                max(0, by - pad) : min(row_bgr.shape[0], by + bh_badge + pad),
+                max(0, bx - pad) : min(row_bgr.shape[1], bx + bw + pad),
+            ]
+            try:
+                text = asyncio.run(vision_utils._winrt_ocr_async(crop))
+            except Exception:
+                continue
+
+            text_up = text.upper().strip()
+            # "NOT SOLD" badges also contain "SOLD" — exclude them.
+            # The yellow gate already filters red "Not Sold" badges, but
+            # we check the text too in case of unexpected badge colours.
+            if "SOLD" not in text_up or "NOT SOLD" in text_up:
+                continue
+
+            _status(f"✅ Badge found in row {row_idx + 1} (OCR: '{text.strip()}')")
+            return {
+                "row_idx": row_idx,
+                "rx": rx,
+                "ry": ry,
+                "rw": rw,
+                "rh": rh,
+                "match_x": bx,
+                "match_y": by,
+                "match_w": bw,
+                "match_h": bh_badge,
+            }
+
+    return None
+
+
+def _find_badge_via_template(row_regions, full_img, search_x_fraction, _status) -> dict | None:
+    """Template-matching path: match the bundled sold-badge images against each row.
+
+    Used as a fallback when OCR is unavailable, or when OCR ran but found no
+    "SOLD" text — so a real badge that OCR failed to read can still be
+    detected pixel-for-pixel against the built-in templates.
+    """
+    import cv2
+    import numpy as np
+
+    import vision_utils
+
+    base_tpl = window_utils.resource_path("assets/sold_badge_template.png")
+    candidates = []
+    for suffix in ("", "_med", "_1024x768"):
+        p = base_tpl.replace(".png", f"{suffix}.png")
+        if os.path.isfile(p):
+            candidates.append(p)
+
+    best_info: dict | None = None
+    best_score = 0.0
+    best_template_name = ""
+    tpl_best_scores: dict[str, float] = {}
+    MIN_W_PCT = 0.08
+    MIN_H_PCT = 0.20
+
+    for row_idx, (rx, ry, rw, rh) in enumerate(row_regions):
+        search_w = int(rw * search_x_fraction)
+        row_pil = full_img.crop((rx, ry, rx + search_w, ry + rh))
+        row_bgr = cv2.cvtColor(np.array(row_pil), cv2.COLOR_RGB2BGR)
+        sh, sw = row_bgr.shape[:2]
+        min_tw = max(4, int(rw * MIN_W_PCT))
+        min_th = max(4, int(rh * MIN_H_PCT))
+
+        for tpl_path in candidates:
+            tpl = cv2.imread(tpl_path)
+            if tpl is None:
+                continue
+            tpl_name = os.path.basename(tpl_path)
+            tpl_row_best = 0.0
+            for scale in np.linspace(1.2, 0.1, 30):
+                th = int(tpl.shape[0] * scale)
+                tw = int(tpl.shape[1] * scale)
+                if tw < min_tw or th < min_th or th > sh or tw > sw:
+                    continue
+                resized = cv2.resize(tpl, (tw, th), interpolation=cv2.INTER_AREA)
+                result = cv2.matchTemplate(row_bgr, resized, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, max_loc = cv2.minMaxLoc(result)
+
+                # The sold badge is a distinct yellow rectangle — a strong pixel
+                # match against a non-yellow area (car thumbnail, price text,
+                # timer icon) is a false positive from edge/gradient similarity,
+                # not an actual badge. Reject it before it can affect either the
+                # displayed score or the pass/fail decision, so the two stay
+                # consistent with each other.
+                mx, my = max_loc
+                matched_crop = row_bgr[my : my + th, mx : mx + tw]
+                if not vision_utils._region_is_yellow(matched_crop):
+                    continue
+
+                if max_val > tpl_row_best:
+                    tpl_row_best = max_val
+                if max_val > best_score:
+                    best_score = max_val
+                    best_template_name = tpl_name
+                    best_info = {
+                        "row_idx": row_idx,
+                        "rx": rx,
+                        "ry": ry,
+                        "rw": rw,
+                        "rh": rh,
+                        "match_x": mx,
+                        "match_y": my,
+                        "match_w": tw,
+                        "match_h": th,
+                    }
+            if tpl_row_best > tpl_best_scores.get(tpl_name, 0.0):
+                tpl_best_scores[tpl_name] = tpl_row_best
+
+    _status("📊 Badge calibration scores (best match per template across all rows):")
+    for tname, score in sorted(tpl_best_scores.items(), key=lambda x: -x[1]):
+        marker = " ← SELECTED" if tname == best_template_name else ""
+        _status(f"   {tname}: {score:.3f}{marker}")
+
+    # Matches the runtime sniping threshold (sniper.SOLD_THRESHOLD) — calibration
+    # shouldn't lock in a badge position on a weaker match than scanning requires.
+    MIN_DETECTION_SCORE = 0.68
+    if best_info is None or best_score < MIN_DETECTION_SCORE:
+        _status(
+            f"❌ Template matching: no sold badge found "
+            f"(best score={best_score:.3f}, need ≥{MIN_DETECTION_SCORE})."
+        )
+        return None
+    return best_info
+
+
+def auto_calibrate_sold_badge(status_label=None) -> dict | None:
+    """Detect the sold badge position by scanning visible auction rows.
+
+    Tries Windows OCR first (winrt packages installed) — reads text out of
+    yellow blobs and looks for "SOLD". If OCR is unavailable, or ran but
+    found nothing, falls back to pixel template matching against the
+    bundled sold-badge images. Only returns None once *both* methods have
+    failed to find a badge — callers can treat that as confirmation no sold
+    car is currently visible, not just that OCR happened to miss it.
+
+    Returns the saved dict, or None if no badge was found.
+    Call this while a sold car is visible in the auction list.
+    """
     import vision_utils
 
     def _status(msg: str) -> None:
@@ -377,138 +536,20 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
     SEARCH_X_FRACTION = 0.55
 
     best_info: dict | None = None
-
     if vision_utils._winrt_available():
-        # OCR path: find yellow blobs in each row, read their text.
-        # The blob that contains "SOLD" (but not "NOT SOLD") is the badge.
-        _status("Scanning auction rows for SOLD badge…")
-
-        for row_idx, (rx, ry, rw, rh) in enumerate(row_regions):
-            search_w = int(rw * SEARCH_X_FRACTION)
-            row_pil = full_img.crop((rx, ry, rx + search_w, ry + rh))
-            row_bgr = cv2.cvtColor(np.array(row_pil), cv2.COLOR_RGB2BGR)
-
-            # Find yellow blobs — the sold badge is a distinct yellow rectangle.
-            hsv = cv2.cvtColor(row_bgr, cv2.COLOR_BGR2HSV)
-            yellow_mask = cv2.inRange(hsv, np.array([24, 100, 100]), np.array([38, 255, 255]))
-            contours, _ = cv2.findContours(yellow_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if not contours:
-                continue
-
-            # Try each yellow blob, largest first.
-            for contour in sorted(contours, key=cv2.contourArea, reverse=True):
-                if cv2.contourArea(contour) < search_w * rh * 0.005:
-                    break  # remaining blobs are too small to be a badge
-                bx, by, bw, bh_badge = cv2.boundingRect(contour)
-                pad = max(4, int(rh * 0.05))
-                crop = row_bgr[
-                    max(0, by - pad) : min(row_bgr.shape[0], by + bh_badge + pad),
-                    max(0, bx - pad) : min(row_bgr.shape[1], bx + bw + pad),
-                ]
-                try:
-                    text = asyncio.run(vision_utils._winrt_ocr_async(crop))
-                except Exception:
-                    continue
-
-                text_up = text.upper().strip()
-                # "NOT SOLD" badges also contain "SOLD" — exclude them.
-                # The yellow gate already filters red "Not Sold" badges, but
-                # we check the text too in case of unexpected badge colours.
-                if "SOLD" not in text_up or "NOT SOLD" in text_up:
-                    continue
-
-                _status(f"✅ Badge found in row {row_idx + 1} (OCR: '{text.strip()}')")
-                best_info = {
-                    "row_idx": row_idx,
-                    "rx": rx,
-                    "ry": ry,
-                    "rw": rw,
-                    "rh": rh,
-                    "match_x": bx,
-                    "match_y": by,
-                    "match_w": bw,
-                    "match_h": bh_badge,
-                }
-                break
-            if best_info:
-                break
-
+        best_info = _find_badge_via_ocr(row_regions, full_img, SEARCH_X_FRACTION, _status)
         if best_info is None:
-            _status(
-                "❌ No SOLD badge detected. "
-                "Make sure a sold car is visible in the auction list and try again."
-            )
-            return None
+            _status("OCR found no SOLD badge — trying template matching…")
 
-    else:
-        # Template matching fallback (when WinRT OCR packages are not installed).
-        base_tpl = window_utils.resource_path("assets/sold_badge_template.png")
-        candidates = []
-        for suffix in ("", "_med", "_1024x768"):
-            p = base_tpl.replace(".png", f"{suffix}.png")
-            if os.path.isfile(p):
-                candidates.append(p)
+    if best_info is None:
+        best_info = _find_badge_via_template(row_regions, full_img, SEARCH_X_FRACTION, _status)
 
-        best_score = 0.0
-        best_template_name = ""
-        tpl_best_scores: dict[str, float] = {}
-        MIN_W_PCT = 0.08
-        MIN_H_PCT = 0.20
-
-        for row_idx, (rx, ry, rw, rh) in enumerate(row_regions):
-            search_w = int(rw * SEARCH_X_FRACTION)
-            row_pil = full_img.crop((rx, ry, rx + search_w, ry + rh))
-            row_bgr = cv2.cvtColor(np.array(row_pil), cv2.COLOR_RGB2BGR)
-            sh, sw = row_bgr.shape[:2]
-            min_tw = max(4, int(rw * MIN_W_PCT))
-            min_th = max(4, int(rh * MIN_H_PCT))
-
-            for tpl_path in candidates:
-                tpl = cv2.imread(tpl_path)
-                if tpl is None:
-                    continue
-                tpl_name = os.path.basename(tpl_path)
-                tpl_row_best = 0.0
-                for scale in np.linspace(1.2, 0.1, 30):
-                    th = int(tpl.shape[0] * scale)
-                    tw = int(tpl.shape[1] * scale)
-                    if tw < min_tw or th < min_th or th > sh or tw > sw:
-                        continue
-                    resized = cv2.resize(tpl, (tw, th), interpolation=cv2.INTER_AREA)
-                    result = cv2.matchTemplate(row_bgr, resized, cv2.TM_CCOEFF_NORMED)
-                    _, max_val, _, max_loc = cv2.minMaxLoc(result)
-                    if max_val > tpl_row_best:
-                        tpl_row_best = max_val
-                    if max_val > best_score:
-                        best_score = max_val
-                        best_template_name = tpl_name
-                        best_info = {
-                            "row_idx": row_idx,
-                            "rx": rx,
-                            "ry": ry,
-                            "rw": rw,
-                            "rh": rh,
-                            "match_x": max_loc[0],
-                            "match_y": max_loc[1],
-                            "match_w": tw,
-                            "match_h": th,
-                        }
-                if tpl_row_best > tpl_best_scores.get(tpl_name, 0.0):
-                    tpl_best_scores[tpl_name] = tpl_row_best
-
-        _status("📊 Badge calibration scores (best match per template across all rows):")
-        for tname, score in sorted(tpl_best_scores.items(), key=lambda x: -x[1]):
-            marker = " ← SELECTED" if tname == best_template_name else ""
-            _status(f"   {tname}: {score:.3f}{marker}")
-
-        MIN_DETECTION_SCORE = 0.45
-        if best_info is None or best_score < MIN_DETECTION_SCORE:
-            _status(
-                f"❌ Badge calibration: no sold badge found "
-                f"(best score={best_score:.3f}, need ≥{MIN_DETECTION_SCORE}). "
-                "Make sure a sold car is visible in the auction list."
-            )
-            return None
+    if best_info is None:
+        _status(
+            "❌ No SOLD badge detected (checked OCR and template matching). "
+            "Make sure a sold car is visible in the auction list and try again."
+        )
+        return None
 
     # --- Save badge parameters (common to both paths) ---
     rw, rh_val = best_info["rw"], best_info["rh"]
@@ -558,16 +599,6 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
     return result_dict
 
 
-def has_sold_badge_auto_cal() -> bool:
-    """Return True if an auto-calibrated sold badge template is saved in config."""
-    try:
-        with open(CONFIG_FILE) as f:
-            data = json.load(f)
-        return "AUTO_SOLD_BADGE_TEMPLATE" in data
-    except Exception:
-        return False
-
-
 def load_sold_badge_template() -> str | None:
     """Return the auto-calibrated sold badge template path, or None if not set."""
     try:
@@ -604,9 +635,17 @@ def reset_sold_badge_auto_cal() -> None:
 
 
 def auto_calibrate(status_label=None):
-    """Auto calibrate: detect the auction options button and select the best sold
-    badge template for the current window size.  Both results are saved to config
-    so the sniper can use them without re-running variant searches every scan.
+    """Auto calibrate: detect the auction options button and the sold badge position.
+
+    Atomic — nothing is saved unless both the button *and* the sold badge
+    (via OCR, falling back to template matching) are actually detected.
+    A failed badge detection fails the whole calibration rather than
+    silently falling back to an unvalidated built-in template.
+
+    Returns (True, verify) on success, where verify indicates whether the
+    saved button region was re-confirmed by a follow-up detection pass.
+    Returns (False, reason) on failure, where reason is "button" or "badge"
+    depending on which detection step failed.
     """
 
     def countdown(msg):
@@ -631,12 +670,19 @@ def auto_calibrate(status_label=None):
                 ),
             )
 
-        base_template = "assets/auction_options_template.png"
+        # When FH6's "Moving Backgrounds" accessibility setting is off, the
+        # Auction Options button has a plain white background instead of the
+        # default animated one, so it needs its own template set.
+        base_template = (
+            "assets/auction_options_template_nomovingbackground.png"
+            if settings.get_moving_background_off()
+            else "assets/auction_options_template.png"
+        )
         result = find_optimal_template_and_location(base_template)
 
         if result is None:
             print("❌ Auto calibration failed: Could not find Auction Options button")
-            return False
+            return False, "button"
 
         template_path, scale, location = result
         left, top, width, height = location
@@ -647,6 +693,26 @@ def auto_calibrate(status_label=None):
             width + PADDING_LEFT + PADDING_RIGHT,
             height + PADDING_TOP + PADDING_BOTTOM,
         )
+
+        # Detect the sold badge position (OCR, falling back to template
+        # matching) *before* saving anything. A calibration where the badge
+        # can't be found either way isn't trustworthy enough to commit — the
+        # sniper would silently run on an unvalidated fallback template.
+        if status_label:
+            status_label.after(
+                0,
+                lambda: status_label.config(
+                    text="Calibrating sold badge position…", bootstyle="warning"
+                ),
+            )
+        badge_result = auto_calibrate_sold_badge(status_label)
+        if badge_result is None:
+            print(
+                "❌ Auto calibration failed: sold badge not detected (checked OCR and "
+                "template matching). Make sure a SOLD car is visible in the auction "
+                "list and try again. No calibration was saved."
+            )
+            return False, "badge"
 
         # Select the best sold badge template for the current window size
         sold_tpl = select_sold_badge_template()
@@ -672,24 +738,7 @@ def auto_calibrate(status_label=None):
         with open(CONFIG_FILE, "w") as f:
             json.dump(cfg_update, f, indent=2)
 
-        print("✅ Auction Options button found and calibrated.")
-
-        # Detect and save sold badge position from the current screen.
-        if status_label:
-            status_label.after(
-                0,
-                lambda: status_label.config(
-                    text="Calibrating sold badge position…", bootstyle="warning"
-                ),
-            )
-        badge_result = auto_calibrate_sold_badge(status_label)
-        badge_ok = badge_result is not None
-        if not badge_ok:
-            print(
-                "⚠️  Sold badge position could not be detected — make sure a SOLD car "
-                "is visible in the auction list and try again. "
-                "The sniper will still work using the built-in badge templates."
-            )
+        print("✅ Auction Options button and sold badge calibrated.")
 
         # Verify the saved parameters still detect the button in the saved region.
         margin = scale * 0.12
@@ -702,13 +751,13 @@ def auto_calibrate(status_label=None):
             confidence=0.65,
         )
         if verify:
-            print("✅ Calibration verified successfully.")
+            print("✅ Auction Options button position verified successfully.")
         else:
             print(
-                "⚠️  Calibration saved but could not be verified — "
+                "⚠️  Auction Options button position saved but could not be verified — "
                 "try recalibrating with the auction screen clearly visible."
             )
-        return True, verify, badge_ok
+        return True, verify
 
     except Exception as e:
         print(f"❌ Auto calibration error: {e}")
@@ -718,6 +767,7 @@ def auto_calibrate(status_label=None):
                 0,
                 lambda t=err_text: status_label.config(text=t, bootstyle="danger"),
             )
+        return False, "error"
 
 
 def load_auto_region():

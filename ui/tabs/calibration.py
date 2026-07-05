@@ -78,6 +78,7 @@ class CalibrationTab(QWidget):
     _status_changed = Signal(str, bool)
     _auction_done = Signal(object, str)
     _badge_done = Signal(str)
+    _auto_calibration_done = Signal(str, str)
 
     def __init__(self, sniper_tab: SniperTab, parent=None):
         super().__init__(parent)
@@ -87,16 +88,26 @@ class CalibrationTab(QWidget):
         self._status_changed.connect(self._set_status)
         self._auction_done.connect(self._on_auction_done)
         self._badge_done.connect(self._on_badge_done)
+        self._auto_calibration_done.connect(self._on_auto_calibration_done)
         self._build_ui()
         self._refresh_status()
 
     def _on_auction_done(self, region, result_text: str) -> None:
+        self.progress_label.setText("")
         self.result_label.setText(result_text)
         self._refresh_status()
         self._set_calibration_buttons(True)
 
     def _on_badge_done(self, result_text: str) -> None:
+        self.progress_label.setText("")
         self.result_label.setText(result_text)
+        self._refresh_status()
+        self._set_calibration_buttons(True)
+
+    def _on_auto_calibration_done(self, html_text: str, stylesheet: str) -> None:
+        self.progress_label.setText("")
+        self.result_label.setStyleSheet(stylesheet)
+        self.result_label.setText(html_text)
         self._refresh_status()
         self._set_calibration_buttons(True)
 
@@ -334,14 +345,13 @@ class CalibrationTab(QWidget):
 
     def _refresh_status(self):
         has_manual = calibrator.has_manual_region()
+        has_manual_badge = window_utils.has_manual_badge_profile()
         has_auto = calibrator.has_auto_region()
-        has_badge = calibrator.has_sold_badge_auto_cal()
 
         lines = [
             f"Manual calibration (auction button): {'SET' if has_manual else 'NOT SET'}",
-            f"Auto calibration (auction button):   {'SET' if has_auto else 'NOT SET'}",
-            f"Auto sold badge template:            "
-            f"{'SET' if has_badge else 'NOT SET (uses runtime selection)'}",
+            f"Manual calibration (sold badge):     {'SET' if has_manual_badge else 'NOT SET'}",
+            f"Auto calibration (button + sold badge): {'SET' if has_auto else 'NOT SET'}",
         ]
         ok = has_manual or has_auto
         self._status_changed.emit("\n".join(lines), ok)
@@ -426,42 +436,41 @@ class CalibrationTab(QWidget):
                 result = calibrator.auto_calibrate(status_label=status_proxy)
             finally:
                 builtins.print = real_print
-            if result and result is not False:
-                unpacked = result if isinstance(result, tuple) else (result, None, None)
-                success = unpacked[0]
-                verified = unpacked[1] if len(unpacked) > 1 else None
-                badge_ok = unpacked[2] if len(unpacked) > 2 else None
+            if isinstance(result, tuple):
+                success, extra = result[0], result[1] if len(result) > 1 else None
             else:
-                success, verified, badge_ok = False, None, None
+                success, extra = False, None
 
-            if success:
+            orange = "#ff9800"
+            red = "#f44336"
+            if success and extra:  # extra is `verified` on success
                 self._sniper_tab.mark_calibration_done()
-                badge_line = (
-                    "   Sold badge position calibrated."
-                    if badge_ok
-                    else "   Sold badge position not detected — using built-in templates."
+                html_text = "✅ Calibration saved and verified.<br>Sold badge position calibrated."
+                stylesheet = "font-size: 11pt;"
+            elif success and not extra:
+                self._sniper_tab.mark_calibration_done()
+                html_text = (
+                    "⚠️ Calibration saved but the auction button position could not be "
+                    "re-verified.<br>Sold badge position calibrated.<br>"
+                    "Try recalibrating with the auction screen clearly visible."
                 )
-                if verified:
-                    _emit_log("✅ Auto calibration complete and verified")
-                    self.result_label.setText(f"✅ Calibration saved and verified.\n{badge_line}")
-                else:
-                    _emit_log("⚠️ Auto calibration saved but verification failed")
-                    self.result_label.setText(
-                        "⚠️ Calibration saved but could not be verified.\n"
-                        "   Try recalibrating with the auction screen clearly visible.\n"
-                        f"{badge_line}"
-                    )
-                    self.result_label.setStyleSheet(
-                        "font-style: italic; font-size: 11pt; color: #ff9800;"
-                    )
+                stylesheet = f"font-size: 11pt; color: {orange};"
+            elif extra == "badge":  # extra is a failure `reason` when not success
+                html_text = (
+                    "❌ Auto calibration failed — sold badge not detected (checked OCR and "
+                    "template matching). No calibration was saved.<br>"
+                    "Make sure a SOLD car is visible in the auction list and try again."
+                )
+                stylesheet = f"font-size: 11pt; color: {red};"
             else:
-                _emit_log("❌ Auto calibration failed")
-                self.result_label.setText(
-                    "❌ Auto calibration failed — make sure the FH6 auction screen is visible"
-                    " and try again."
+                html_text = (
+                    "❌ Auto calibration failed — Auction Options button not detected. "
+                    "No calibration was saved.<br>"
+                    "Make sure the auction screen is clearly visible and try again."
                 )
-            self._refresh_status()
-            self._set_calibration_buttons(True)
+                stylesheet = f"font-size: 11pt; color: {red};"
+
+            self._auto_calibration_done.emit(html_text, stylesheet)
 
         threading.Thread(target=_work, daemon=True).start()
 

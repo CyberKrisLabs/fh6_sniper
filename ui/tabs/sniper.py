@@ -224,7 +224,8 @@ class SniperTab(QWidget):
                     result = calibrator.auto_calibrate(status_label=status_proxy)
                 finally:
                     builtins.print = real_print
-                if result and result is not False:
+                success = result[0] if isinstance(result, tuple) else bool(result)
+                if success:
                     self.mark_calibration_done()
                     _emit_log("✅ Auto calibration complete (overlay)")
                 else:

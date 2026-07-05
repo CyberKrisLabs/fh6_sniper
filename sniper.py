@@ -124,8 +124,16 @@ def car_available(region, test=False, full_img=None):
         )
         auto_template_info = calibrator.load_auto_template_info()
 
-        # Define base template path for reuse
-        base_template = window_utils.resource_path("assets/auction_options_template.png")
+        # Define base template path for reuse. When FH6's "Moving Backgrounds"
+        # accessibility setting is off, the Auction Options button has a plain
+        # white background instead of the default animated one, so it needs
+        # its own template set.
+        auction_tpl_name = (
+            "auction_options_template_nomovingbackground.png"
+            if cfg.get("MOVING_BACKGROUND_OFF", False)
+            else "auction_options_template.png"
+        )
+        base_template = window_utils.resource_path(f"assets/{auction_tpl_name}")
 
         # If the caller passed a shared full-screen grab, crop the button region
         # from it so this call and find_last_available_row() operate on the same

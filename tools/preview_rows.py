@@ -126,7 +126,7 @@ class ControlPanel(QWidget):
         self._overlay = overlay
         self._step = 1
         self._x_correction = 0
-        self._step1_win = None  # window info captured at step 1 accept
+        self._step1_win: dict[str, int] | None = None  # window info captured at step 1 accept
 
         self._build_ui()
         self._enter_step1()

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QGroupBox,
@@ -105,6 +106,22 @@ class SettingsTab(QWidget):
             "so if you only want 1 or 2 cars it won't keep buying.\n\n"
             "0 = Infinite: runs until you stop it manually or Number of Scans target is reached.\n"
             "Range: 0 (Infinite) – 100."
+        )
+        dlg.setIcon(QMessageBox.Icon.Information)
+        dlg.exec()
+
+    def _show_moving_bg_info(self):
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Moving Background OFF")
+        dlg.setText("<b>Moving Background OFF</b>")
+        dlg.setInformativeText(
+            "Tick this if you've turned off FH6's 'Moving Backgrounds' accessibility "
+            "setting.\n\n"
+            "With Moving Backgrounds off, the Auction Options button has a plain white "
+            "background instead of the default animated one, so the sniper needs a "
+            "different template to detect it.\n\n"
+            "This affects both the live sniper and Auto Calibration — re-run Auto "
+            "Calibration after changing this."
         )
         dlg.setIcon(QMessageBox.Icon.Information)
         dlg.exec()
@@ -225,6 +242,27 @@ class SettingsTab(QWidget):
         self.buyout_target_spin.valueChanged.connect(self._on_value_changed)
         scan_layout.addStretch()
         right_col.addWidget(scan_box)
+
+        bg_box = QGroupBox("Auction Screen")
+        bg_layout = QVBoxLayout(bg_box)
+        bg_layout.setSpacing(6)
+        bg_row = QHBoxLayout()
+        self.moving_bg_off_cb = QCheckBox("Moving Background OFF")
+        bg_info_btn = QPushButton("ⓘ")
+        bg_info_btn.setFixedSize(22, 22)
+        bg_info_btn.setFlat(True)
+        bg_info_btn.setStyleSheet(
+            "QPushButton { font-size: 13pt; color: #2196f3; border: none; padding: 0; }"
+            "QPushButton:hover { color: #64b5f6; }"
+        )
+        bg_info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        bg_info_btn.clicked.connect(self._show_moving_bg_info)
+        bg_row.addWidget(self.moving_bg_off_cb)
+        bg_row.addWidget(bg_info_btn)
+        bg_row.addStretch()
+        bg_layout.addLayout(bg_row)
+        self.moving_bg_off_cb.toggled.connect(self._on_moving_bg_toggled)
+        right_col.addWidget(bg_box)
         right_col.addStretch()
 
         columns_row.addLayout(left_col)
@@ -307,9 +345,18 @@ class SettingsTab(QWidget):
             self.buy_interval_spin.setValue(timings.get("buy_attempt_interval", 0.6))
             self.post_buy_spin.setValue(timings.get("post_buy_wait", 5.0))
             self.reset_interval_spin.setValue(timings.get("reset_interval", 0.9))
+            self.moving_bg_off_cb.setChecked(settings.get_moving_background_off())
         finally:
             self._applying_preset = False
         self._detect_preset()
+
+    def _on_moving_bg_toggled(self, checked: bool) -> None:
+        if self._applying_preset:
+            return
+        settings.set_moving_background_off(checked)
+        self.feedback_label.setText("Settings saved")
+        self.feedback_label.setStyleSheet("color: #4caf50;")
+        QTimer.singleShot(2000, lambda: self.feedback_label.setText(""))
 
     def _detect_preset(self):
         current = {

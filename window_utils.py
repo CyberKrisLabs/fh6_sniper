@@ -36,11 +36,11 @@ def _get_display_dpr() -> float:
         pass
     # Qt fallback (works when called from the GUI process)
     try:
-        from PySide6.QtWidgets import QApplication
+        from PySide6.QtGui import QGuiApplication
 
-        app = QApplication.instance()
-        if app:
-            return float(app.primaryScreen().devicePixelRatio())
+        screen = QGuiApplication.primaryScreen()
+        if screen:
+            return float(screen.devicePixelRatio())
     except Exception:
         pass
     return 1.0
@@ -440,6 +440,27 @@ def save_badge_params(params: dict, win_w: int, win_h: int, dpr: float = 1.0) ->
     os.makedirs(os.path.dirname(_BADGE_REGION_PATH), exist_ok=True)
     with open(_BADGE_REGION_PATH, "w") as f:
         json.dump({"profiles": profiles}, f, indent=2)
+
+
+def has_manual_badge_profile() -> bool:
+    """Return True if a manually hover-captured sold badge profile is saved.
+
+    Distinguishes manual calibration (ui/tabs/calibration.py::_save_badge_from_clicks)
+    from auto calibration (calibrator.py::auto_calibrate_sold_badge) via the "note"
+    field both writers stamp onto their profile.
+    """
+    try:
+        with open(_BADGE_REGION_PATH) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return False
+    if "profiles" in data:
+        profiles = data["profiles"]
+    elif any(k.startswith("badge_") for k in data):
+        profiles = [data]  # legacy flat format
+    else:
+        profiles = []
+    return any("Manually calibrated" in str(p.get("note", "")) for p in profiles)
 
 
 def bottom_left_quarter(region):

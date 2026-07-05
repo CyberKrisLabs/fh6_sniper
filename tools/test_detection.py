@@ -371,7 +371,7 @@ class DetectionTestWindow(QWidget):
 
                 score: float | None = None
                 badge_img = None
-                if has_car and check_sold:
+                if has_car and check_sold and self._badge_params is not None:
                     # Crop badge from already-captured row image — avoids a second
                     # grab_region call which can return a different (stale) frame.
                     rx, ry, rw, rh = region

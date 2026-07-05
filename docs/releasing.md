@@ -10,7 +10,7 @@ Pushing a version tag triggers the **Release** GitHub Actions workflow, which:
 
 ## Cutting a release
 
-1. Bump `__version__` in `app.py`:
+1. Bump `__version__` in `ui/tabs/info.py`:
    ```python
    __version__ = "2.1.0"
    ```
@@ -24,7 +24,7 @@ Pushing a version tag triggers the **Release** GitHub Actions workflow, which:
 
 3. Commit and push:
    ```powershell
-   git add app.py installer/installer.iss
+   git add ui/tabs/info.py installer/installer.iss
    git commit -m "Bump version to 2.1.0"
    git push
    ```

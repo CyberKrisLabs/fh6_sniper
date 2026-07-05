@@ -25,7 +25,7 @@ import window_utils
 CONFIG_FILE = window_utils.get_config_file()
 
 # simple in-memory cache for loaded templates to avoid disk I/O
-_template_cache = {}
+_template_cache: dict[str, np.ndarray] = {}
 
 # dxcam camera instance — reused across calls (DXGI Desktop Duplication)
 _dxcam_instance = None
@@ -58,7 +58,7 @@ def release_dxcam() -> None:
         _dxcam_instance = None
 
 
-def grab_full_screen() -> Image | None:
+def grab_full_screen() -> Image.Image | None:
     """Capture the entire primary display using DXGI Desktop Duplication.
 
     A single full-screen grab produces one complete GPU frame so all callers
@@ -135,7 +135,7 @@ def grab_region(region: tuple[int, int, int, int]):
 
 # remember the last successful scale for each template path; helps narrow
 # future searches when the window size is stable.
-_last_scale_hint = {}
+_last_scale_hint: dict[str, float] = {}
 
 
 # thresholds for distinguishing window sizes relative to the screen.
