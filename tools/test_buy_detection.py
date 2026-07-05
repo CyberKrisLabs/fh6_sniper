@@ -4,7 +4,7 @@ Usage
 -----
 1. In FH6, trigger a buy so the result screen (success or failure) is visible.
 2. Switch to this terminal window and run:
-       python test_buy_detection.py
+       python tools/test_buy_detection.py
 3. You have 5 seconds to switch back to FH6 before the capture fires.
 4. The script saves a timestamped PNG to docs/ and prints the best match score
    for every template variant so you can see exactly why detection went wrong.
@@ -26,10 +26,11 @@ import numpy as np
 import pyautogui
 
 # Make sure project root is on the path when run from any directory.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import vision_utils
 import window_utils
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 CONFIDENCE = 0.72  # same default used in buy_sequence for full-size windows
 SCALE_MIN = 0.35
@@ -37,7 +38,7 @@ SCALE_MAX = 1.0
 SCALE_STEPS = 30  # more steps for thorough diagnosis
 COUNTDOWN = 5
 
-OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs")
+OUTPUT_DIR = os.path.join(ROOT, "docs")
 
 
 def _load_gray(path: str):
