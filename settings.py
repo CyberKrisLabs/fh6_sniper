@@ -19,10 +19,19 @@ MAX_INTERVAL = 20.0  # maximum interval to prevent unbearably slow execution
 MIN_SCANS = 0  # 0 means infinite
 MAX_SCANS = 1000000
 
+# reset_interval needs a higher floor than MIN_INTERVAL — below this, the game
+# won't reliably register the keystroke, regardless of how fast the PC is.
+MIN_INTERVAL_OVERRIDES: dict[str, float] = {
+    "reset_interval": 0.5,
+}
+
 DEFAULT_TIMINGS: dict[str, float] = {
-    "buy_attempt_interval": 0.6,
+    "car_available_interval": 0.6,
+    "nav_interval": 0.3,
+    "confirm_buy_interval": 0.35,
     "post_buy_wait": 5.0,
     "reset_interval": 0.9,
+    "load_cars_interval": 0.9,
 }
 
 # All default values
@@ -76,16 +85,20 @@ def validate_settings(timings_dict, scans_value, buyout_target=None):
 
     # Validate intervals
     interval_names = {
-        "buy_attempt_interval": "Buy Interval",
+        "car_available_interval": "Car Available Interval",
+        "nav_interval": "Nav Interval",
+        "confirm_buy_interval": "Confirm Buy Interval",
         "post_buy_wait": "Post Buy Wait",
         "reset_interval": "Reset Interval",
+        "load_cars_interval": "Load Cars Interval",
     }
 
     for key, display_name in interval_names.items():
+        min_val = MIN_INTERVAL_OVERRIDES.get(key, MIN_INTERVAL)
         val = timings_dict.get(key, 0)
-        if val < MIN_INTERVAL:
-            errors.append(f"{display_name} must be at least {MIN_INTERVAL}")
-            corrected["timings"][key] = MIN_INTERVAL
+        if val < min_val:
+            errors.append(f"{display_name} must be at least {min_val}")
+            corrected["timings"][key] = min_val
         elif val > MAX_INTERVAL:
             errors.append(f"{display_name} cannot exceed {MAX_INTERVAL}")
             corrected["timings"][key] = MAX_INTERVAL
@@ -109,16 +122,14 @@ def load_config():
         # MIGRATION FIRST: handle deprecated keys before validation
         if "TIMINGS" in user_config:
             # merge only known timing keys, ignore deprecated ones
-            user_times = {
-                k: v for k, v in user_config.get("TIMINGS", {}).items() if k in DEFAULT_TIMINGS
-            }
-            # migrate old menu_interval if present
-            if "menu_interval" in user_config.get("TIMINGS", {}):
-                val = user_config["TIMINGS"].get("menu_interval")
-                user_times.setdefault("buy_attempt_interval", val)
+            old_timings = user_config.get("TIMINGS", {})
+            user_times = {k: v for k, v in old_timings.items() if k in DEFAULT_TIMINGS}
+            # migrate old buy_attempt_interval (renamed to car_available_interval)
+            if "buy_attempt_interval" in old_timings:
+                user_times.setdefault("car_available_interval", old_timings["buy_attempt_interval"])
             config["TIMINGS"] = {**DEFAULT_TIMINGS, **user_times}
             # if there were deprecated keys in the original user_config, clean them from file
-            deprecated = [k for k in user_config.get("TIMINGS", {}) if k not in DEFAULT_TIMINGS]
+            deprecated = [k for k in old_timings if k not in DEFAULT_TIMINGS]
             if deprecated:
                 # rewrite to remove them
                 save_config(config)
@@ -141,10 +152,18 @@ def load_config():
         # Validate and fix timing intervals
         if "TIMINGS" in config:
             needs_save = False
-            for key in ["buy_attempt_interval", "post_buy_wait", "reset_interval"]:
+            for key in [
+                "car_available_interval",
+                "nav_interval",
+                "confirm_buy_interval",
+                "post_buy_wait",
+                "reset_interval",
+                "load_cars_interval",
+            ]:
+                min_val = MIN_INTERVAL_OVERRIDES.get(key, MIN_INTERVAL)
                 val = config["TIMINGS"].get(key, 0)
-                if val < MIN_INTERVAL:
-                    config["TIMINGS"][key] = MIN_INTERVAL
+                if val < min_val:
+                    config["TIMINGS"][key] = min_val
                     needs_save = True
                 elif val > MAX_INTERVAL:
                     config["TIMINGS"][key] = MAX_INTERVAL

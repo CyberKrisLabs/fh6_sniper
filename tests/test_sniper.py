@@ -67,16 +67,16 @@ class _FakeScreen:
 def test_reset_search(monkeypatch):
     calls = []
 
-    def fake_write(keys, interval=None):
-        calls.append(tuple(keys))
+    def fake_press(key):
+        calls.append(key)
 
     monkeypatch.setattr(window_utils, "wait_for_fh6_focus", lambda stop_event=None: True)
     monkeypatch.setattr(window_utils, "is_fh6_focused", lambda: True)
-    monkeypatch.setattr(sniper.pyautogui, "typewrite", fake_write)
+    monkeypatch.setattr(sniper.pyautogui, "press", fake_press)
     sniper.reset_search(settings.load_timings())
-    assert calls, "reset_search should have sent keystrokes"
+    assert calls == ["esc", "\n", "\n"], "reset_search should press esc, enter, enter in order"
 
-    # if unfocused, no write
+    # if unfocused, no keys sent
     calls.clear()
     monkeypatch.setattr(window_utils, "is_fh6_focused", lambda: False)
     sniper.reset_search(settings.load_timings())

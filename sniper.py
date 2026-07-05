@@ -33,10 +33,23 @@ CONFIG_FILE = window_utils.get_config_file()
 # -------------------------
 
 DEFAULT_TIMINGS = {
-    # interval used for both pre-press pause and menu navigation during buy attempts
-    "buy_attempt_interval": 0.4,
+    # pause after pressing "y" while the buy dialog renders
+    "car_available_interval": 0.4,
+    # delay between up/down key presses only (row navigation, buy dialog
+    # down-arrow) — can be faster since nothing needs to load
+    "nav_interval": 0.3,
+    # pause between the two Enter presses that confirm the purchase — slightly
+    # higher than nav_interval since confirming is a bit more failure-sensitive
+    # than plain navigation, but still faster than car_available_interval
+    "confirm_buy_interval": 0.35,
     "post_buy_wait": 5.0,
+    # pause after Escape and after the first Enter of the reset sequence
+    # (esc -> pause -> enter -> pause -> enter)
     "reset_interval": 0.8,
+    # pause after the final Enter of the reset sequence, while the list loads —
+    # defaults to match reset_interval so the total matches the original
+    # single-value reset_interval timing; lower it if your connection is fast
+    "load_cars_interval": 0.8,
 }
 
 
@@ -188,7 +201,7 @@ def car_available(region, test=False, full_img=None):
             # shift the real scale slightly and miss an exact hit.  Lower confidence
             # (0.65) for the same reason — calibration found it at ≥0.70 so 0.65
             # still avoids false positives while tolerating normal scene variation.
-            margin = scale * 0.12
+            margin = scale * 0.3
             location = vision_utils.locate_on_screen_scaled(
                 template_path,
                 region=region,
@@ -231,7 +244,7 @@ def car_available(region, test=False, full_img=None):
                 scale_min=scale_min,
                 scale_max=scale_max,
                 scale_hint=scale_hint_val,
-                hint_margin=0.12,
+                hint_margin=0.3,
                 debug=False,
                 screenshot=screenshot,
             )
@@ -398,10 +411,15 @@ def buy_sequence(t, full_region=None, stop_event=None, log=None):
     _sleep = stop_event.wait if stop_event is not None else time.sleep
 
     pyautogui.press("y")
-    interval = t.get("buy_attempt_interval", 0.4)
-    _sleep(interval)
+    car_available_interval = t.get("car_available_interval", 0.4)
+    _sleep(car_available_interval)
 
-    pyautogui.typewrite(["down", "\n", "\n"], interval=interval)
+    nav_interval = t.get("nav_interval", 0.3)
+    pyautogui.press("down")
+    _sleep(nav_interval)
+
+    confirm_buy_interval = t.get("confirm_buy_interval", 0.35)
+    pyautogui.typewrite(["\n", "\n"], interval=confirm_buy_interval)
     _sleep(t["post_buy_wait"])
 
     # Single grab shared by both template matches to avoid DXGI frame inconsistency.
@@ -453,7 +471,13 @@ def reset_search(t, stop_event=None, log=None):
             return
     except Exception:
         return
-    pyautogui.typewrite(["esc", "\n", "\n"], interval=t["reset_interval"])
+    _sleep = stop_event.wait if stop_event is not None else time.sleep
+    pyautogui.press("esc")
+    _sleep(t["reset_interval"])
+    pyautogui.press("\n")
+    _sleep(t["reset_interval"])
+    pyautogui.press("\n")
+    _sleep(t.get("load_cars_interval", 0.8))
 
 
 # -------------------------
@@ -619,7 +643,7 @@ def sniper_loop(
 
                         # Navigate from row 1 (default) down to the target row
                         if available > 0:
-                            nav_delay = max(0.08, timings.get("buy_attempt_interval", 0.4) * 0.2)
+                            nav_delay = timings.get("nav_interval", 0.3)
                             for _ in range(available):
                                 pyautogui.press("down")
                                 stop_event.wait(nav_delay)
