@@ -5,6 +5,7 @@ import json
 import os
 import threading
 import time
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -27,6 +28,9 @@ from ui.log_bridge import _emit_log, _log_bridge
 from ui.overlays.calibration import _CalibrationOverlay
 from ui.overlays.ingame import _IngameOverlay
 
+if TYPE_CHECKING:
+    from ui.tabs.settings import SettingsTab
+
 
 class SniperTab(QWidget):
     stats_updated = Signal(int, int, int, int, int)
@@ -41,6 +45,12 @@ class SniperTab(QWidget):
         self._calib_done_this_session = False
         self._elapsed = 0
         self._ingame_overlay = None
+        # Overlay visibility is a persisted setting (Settings tab tick box);
+        # the watcher shows/hides the overlay based on this flag + FH6 focus.
+        self._overlay_enabled = settings.get_show_ingame_overlay()
+        # Set by SettingsTab.__init__ so the overlay's Hide button can untick
+        # the Settings checkbox.
+        self._settings_tab: SettingsTab | None = None
         self._calibration_in_progress = False
         self._calib_tab = None
         self._navigate_to_calibration = None
@@ -78,13 +88,8 @@ class SniperTab(QWidget):
         self.stop_btn.setProperty("class", "danger-btn")
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self._stop)
-        self.ingame_overlay_btn = QPushButton("Show In-game Overlay")
-        self.ingame_overlay_btn.setCheckable(True)
-        self.ingame_overlay_btn.setFixedWidth(160)
-        self.ingame_overlay_btn.clicked.connect(self._toggle_ingame_overlay)
         btn_col.addWidget(self.start_btn)
         btn_col.addWidget(self.stop_btn)
-        btn_col.addWidget(self.ingame_overlay_btn)
         ctrl.addLayout(btn_col)
 
         ctrl.addStretch()
@@ -121,10 +126,13 @@ class SniperTab(QWidget):
         self._append_log("Ready...")
 
     def _append_log(self, msg: str):
+        # "⚠" appears both with and without the emoji variation selector
+        # (U+FE0F) across log messages — match both so they color the same.
         color_map = {
             "✅": "#4caf50",
             "❌": "#f44336",
             "⚠️": "#ff9800",
+            "⚠": "#ff9800",
             "🛑": "#f44336",
             "🚀": "#2196f3",
             "🔒": "#9e9e9e",
@@ -151,7 +159,6 @@ class SniperTab(QWidget):
         self._calibration_in_progress = not enabled
         self.start_btn.setEnabled(enabled and not self._sniper_running)
         self.stop_btn.setEnabled(enabled and self._sniper_running)
-        self.ingame_overlay_btn.setEnabled(enabled)
         if self._ingame_overlay is not None:
             self._ingame_overlay._auto_cal_btn.setEnabled(enabled)
             self._ingame_overlay._manual_auction_btn.setEnabled(enabled)
@@ -378,34 +385,31 @@ class SniperTab(QWidget):
             _emit_log("🛑 Stop requested...")
             self.stop_btn.setEnabled(False)
 
-    def _toggle_ingame_overlay(self, checked: bool) -> None:
-        if checked:
-            self._show_ingame_overlay()
-        else:
-            self._hide_ingame_overlay()
-
-    def _show_ingame_overlay(self) -> None:
-        win = window_utils.get_fh6_window()
-        if not win:
-            _emit_log("⚠ FH6 window not found — open the game first")
-            self.ingame_overlay_btn.setChecked(False)
-            return
-
-        if self._ingame_overlay is None:
-            self._ingame_overlay = _IngameOverlay(self)
-        self.ingame_overlay_btn.setText("Hide In-game Overlay")
-        self.ingame_overlay_btn.setChecked(True)
-
-    def _hide_ingame_overlay(self) -> None:
-        if self._ingame_overlay is not None:
+    def set_overlay_enabled(self, enabled: bool) -> None:
+        """Called by the Settings tab tick box. Shows/hides the in-game overlay."""
+        self._overlay_enabled = enabled
+        if enabled:
+            # Show right away if FH6 is up; otherwise the watcher will show
+            # it as soon as the game window gains focus.
+            if self._ingame_overlay is None and window_utils.get_fh6_window():
+                self._ingame_overlay = _IngameOverlay(self)
+        elif self._ingame_overlay is not None:
             self._ingame_overlay.close()
             self._ingame_overlay = None
-        self.ingame_overlay_btn.setText("Show In-game Overlay")
-        self.ingame_overlay_btn.setChecked(False)
+
+    def overlay_hidden_by_user(self) -> None:
+        """The overlay's Hide button was clicked — persist the setting off."""
+        self._overlay_enabled = False
+        try:
+            settings.set_show_ingame_overlay(False)
+        except Exception:
+            pass
+        if self._settings_tab is not None:
+            self._settings_tab.sync_overlay_checkbox(False)
 
     def _overlay_watcher_tick(self) -> None:
         try:
-            want = getattr(self, "ingame_overlay_btn", None) and self.ingame_overlay_btn.isChecked()
+            want = self._overlay_enabled
             win = window_utils.get_fh6_window()
             active = window_utils.gw.getActiveWindow()
             focused = bool(

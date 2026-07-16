@@ -35,35 +35,71 @@ def test_initial_values_in_range(settings_tab):
     assert 0.1 <= settings_tab.nav_interval_spin.value() <= 20.0
     assert 0.1 <= settings_tab.confirm_buy_spin.value() <= 20.0
     assert 0.1 <= settings_tab.post_buy_spin.value() <= 20.0
-    assert 0.5 <= settings_tab.reset_interval_spin.value() <= 20.0
+    assert 0.5 <= settings_tab.exit_auction_spin.value() <= 20.0
+    assert 0.1 <= settings_tab.enter_auction_spin.value() <= 20.0
     assert 0.1 <= settings_tab.load_cars_spin.value() <= 20.0
     assert 0 <= settings_tab.scans_spin.value() <= 1000000
 
 
-def test_reset_interval_spin_floored_at_half_second(settings_tab):
-    assert settings_tab.reset_interval_spin.minimum() == 0.5
-    settings_tab.reset_interval_spin.setValue(0.1)
-    assert settings_tab.reset_interval_spin.value() == 0.5
+def test_exit_auction_spin_floored_at_half_second(settings_tab):
+    assert settings_tab.exit_auction_spin.minimum() == 0.5
+    settings_tab.exit_auction_spin.setValue(0.1)
+    assert settings_tab.exit_auction_spin.value() == 0.5
+    # Enter Auction's floor is temporarily lifted to 0.1 for real-world testing
+    assert settings_tab.enter_auction_spin.minimum() == 0.1
 
 
 def test_preset_fast_applies_values(settings_tab):
     settings_tab.preset_combo.setCurrentText("Fast")
-    assert abs(settings_tab.car_available_spin.value() - 0.3) < 0.01
-    assert abs(settings_tab.nav_interval_spin.value() - 0.2) < 0.01
+    assert abs(settings_tab.car_available_spin.value() - 0.4) < 0.01
+    assert abs(settings_tab.nav_interval_spin.value() - 0.3) < 0.01
+    assert abs(settings_tab.confirm_buy_spin.value() - 0.35) < 0.01
+    assert abs(settings_tab.post_buy_spin.value() - 4.0) < 0.01
+    assert abs(settings_tab.exit_auction_spin.value() - 0.725) < 0.01
+    assert abs(settings_tab.enter_auction_spin.value() - 0.3) < 0.01
+    assert abs(settings_tab.load_cars_spin.value() - 0.8) < 0.01
+
+
+def test_preset_faster_applies_values(settings_tab):
+    settings_tab.preset_combo.setCurrentText("Faster")
+    assert abs(settings_tab.car_available_spin.value() - 0.25) < 0.01
+    assert abs(settings_tab.nav_interval_spin.value() - 0.25) < 0.01
     assert abs(settings_tab.confirm_buy_spin.value() - 0.25) < 0.01
     assert abs(settings_tab.post_buy_spin.value() - 4.0) < 0.01
-    assert abs(settings_tab.reset_interval_spin.value() - 0.625) < 0.01
-    assert abs(settings_tab.load_cars_spin.value() - 0.7) < 0.01
+    assert abs(settings_tab.exit_auction_spin.value() - 0.7) < 0.01
+    assert abs(settings_tab.enter_auction_spin.value() - 0.25) < 0.01
+    assert abs(settings_tab.load_cars_spin.value() - 0.75) < 0.01
 
 
 def test_preset_slow_applies_values(settings_tab):
     settings_tab.preset_combo.setCurrentText("Slow")
-    assert abs(settings_tab.car_available_spin.value() - 0.7) < 0.01
-    assert abs(settings_tab.nav_interval_spin.value() - 0.6) < 0.01
-    assert abs(settings_tab.confirm_buy_spin.value() - 0.65) < 0.01
+    assert abs(settings_tab.car_available_spin.value() - 0.8) < 0.01
+    assert abs(settings_tab.nav_interval_spin.value() - 0.7) < 0.01
+    assert abs(settings_tab.confirm_buy_spin.value() - 0.75) < 0.01
     assert abs(settings_tab.post_buy_spin.value() - 6.0) < 0.01
-    assert abs(settings_tab.reset_interval_spin.value() - 1.1) < 0.01
-    assert abs(settings_tab.load_cars_spin.value() - 1.1) < 0.01
+    assert abs(settings_tab.exit_auction_spin.value() - 1.2) < 0.01
+    assert abs(settings_tab.enter_auction_spin.value() - 0.7) < 0.01
+    assert abs(settings_tab.load_cars_spin.value() - 1.2) < 0.01
+
+
+def test_buy_last_checkbox_defaults_on(settings_tab):
+    assert settings_tab.buy_last_cb.isChecked()
+
+
+def test_overlay_checkbox_defaults_off_and_toggles(settings_tab):
+    assert not settings_tab.overlay_cb.isChecked()
+    assert settings_tab._sniper_tab._overlay_enabled is False
+    settings_tab.overlay_cb.setChecked(True)
+    assert settings.get_show_ingame_overlay() is True
+    assert settings_tab._sniper_tab._overlay_enabled is True
+
+
+def test_default_timings_match_mid_preset():
+    """A fresh config must detect as 'Mid', not 'Custom' — keep defaults in sync."""
+    from ui.tabs.settings import PRESETS
+
+    for key, val in PRESETS["Mid"].items():
+        assert abs(settings.DEFAULT_TIMINGS[key] - val) < 0.01, key
 
 
 def test_save_shows_success_feedback(settings_tab, qtbot):
@@ -75,12 +111,13 @@ def test_save_shows_success_feedback(settings_tab, qtbot):
 
 
 def test_detect_preset_mid(settings_tab):
-    settings_tab.car_available_spin.setValue(0.5)
-    settings_tab.nav_interval_spin.setValue(0.3)
-    settings_tab.confirm_buy_spin.setValue(0.35)
+    settings_tab.car_available_spin.setValue(0.6)
+    settings_tab.nav_interval_spin.setValue(0.4)
+    settings_tab.confirm_buy_spin.setValue(0.45)
     settings_tab.post_buy_spin.setValue(5.0)
-    settings_tab.reset_interval_spin.setValue(0.8)
-    settings_tab.load_cars_spin.setValue(0.8)
+    settings_tab.exit_auction_spin.setValue(0.9)
+    settings_tab.enter_auction_spin.setValue(0.4)
+    settings_tab.load_cars_spin.setValue(0.9)
     settings_tab._detect_preset()
     assert settings_tab.preset_combo.currentText() == "Mid"
 
@@ -90,7 +127,8 @@ def test_detect_preset_custom(settings_tab):
     settings_tab.nav_interval_spin.setValue(0.9)
     settings_tab.confirm_buy_spin.setValue(0.9)
     settings_tab.post_buy_spin.setValue(3.3)
-    settings_tab.reset_interval_spin.setValue(2.5)
+    settings_tab.exit_auction_spin.setValue(2.5)
+    settings_tab.enter_auction_spin.setValue(2.5)
     settings_tab.load_cars_spin.setValue(2.5)
     settings_tab._detect_preset()
     assert settings_tab.preset_combo.currentText() == "Custom"

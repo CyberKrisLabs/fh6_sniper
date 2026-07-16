@@ -73,8 +73,10 @@ def test_validate_interval_too_low():
         "nav_interval": 0.1,
         "confirm_buy_interval": 0.1,
         "post_buy_wait": 5.0,
-        "reset_interval": 0.8,
+        "exit_auction_interval": 0.8,
+        "enter_auction_interval": 0.8,
         "load_cars_interval": 0.8,
+        "buy_result_retry_wait": 0.8,
     }
     is_valid, error_msg, corrected = settings.validate_settings(timings, 100)
     assert not is_valid
@@ -89,8 +91,10 @@ def test_validate_interval_too_high():
         "nav_interval": 0.1,
         "confirm_buy_interval": 0.1,
         "post_buy_wait": 5.0,
-        "reset_interval": 0.8,
+        "exit_auction_interval": 0.8,
+        "enter_auction_interval": 0.8,
         "load_cars_interval": 0.8,
+        "buy_result_retry_wait": 0.8,
     }
     is_valid, error_msg, corrected = settings.validate_settings(timings, 100)
     assert not is_valid
@@ -105,8 +109,10 @@ def test_validate_nav_interval_too_low():
         "nav_interval": -0.5,
         "confirm_buy_interval": 0.1,
         "post_buy_wait": 5.0,
-        "reset_interval": 0.8,
+        "exit_auction_interval": 0.8,
+        "enter_auction_interval": 0.8,
         "load_cars_interval": 0.8,
+        "buy_result_retry_wait": 0.8,
     }
     is_valid, error_msg, corrected = settings.validate_settings(timings, 100)
     assert not is_valid
@@ -121,8 +127,10 @@ def test_validate_nav_interval_too_high():
         "nav_interval": 25.0,
         "confirm_buy_interval": 0.1,
         "post_buy_wait": 5.0,
-        "reset_interval": 0.8,
+        "exit_auction_interval": 0.8,
+        "enter_auction_interval": 0.8,
         "load_cars_interval": 0.8,
+        "buy_result_retry_wait": 0.8,
     }
     is_valid, error_msg, corrected = settings.validate_settings(timings, 100)
     assert not is_valid
@@ -137,8 +145,10 @@ def test_validate_confirm_buy_interval_too_low():
         "nav_interval": 0.1,
         "confirm_buy_interval": -0.5,
         "post_buy_wait": 5.0,
-        "reset_interval": 0.8,
+        "exit_auction_interval": 0.8,
+        "enter_auction_interval": 0.8,
         "load_cars_interval": 0.8,
+        "buy_result_retry_wait": 0.8,
     }
     is_valid, error_msg, corrected = settings.validate_settings(timings, 100)
     assert not is_valid
@@ -153,8 +163,10 @@ def test_validate_confirm_buy_interval_too_high():
         "nav_interval": 0.1,
         "confirm_buy_interval": 25.0,
         "post_buy_wait": 5.0,
-        "reset_interval": 0.8,
+        "exit_auction_interval": 0.8,
+        "enter_auction_interval": 0.8,
         "load_cars_interval": 0.8,
+        "buy_result_retry_wait": 0.8,
     }
     is_valid, error_msg, corrected = settings.validate_settings(timings, 100)
     assert not is_valid
@@ -169,8 +181,10 @@ def test_validate_load_cars_interval_too_low():
         "nav_interval": 0.1,
         "confirm_buy_interval": 0.1,
         "post_buy_wait": 5.0,
-        "reset_interval": 0.8,
+        "exit_auction_interval": 0.8,
+        "enter_auction_interval": 0.8,
         "load_cars_interval": -0.5,
+        "buy_result_retry_wait": 0.8,
     }
     is_valid, error_msg, corrected = settings.validate_settings(timings, 100)
     assert not is_valid
@@ -178,20 +192,38 @@ def test_validate_load_cars_interval_too_low():
     assert corrected["timings"]["load_cars_interval"] == settings.MIN_INTERVAL
 
 
-def test_validate_reset_interval_below_floor():
-    """Test that reset_interval below its 0.5s floor is caught, even if above MIN_INTERVAL."""
+def test_validate_exit_auction_below_floor():
+    """Exit Auction has a 0.5s floor; Enter Auction's is temporarily lifted for testing."""
     timings = {
         "car_available_interval": 0.4,
         "nav_interval": 0.1,
         "confirm_buy_interval": 0.1,
         "post_buy_wait": 5.0,
-        "reset_interval": 0.3,
+        "exit_auction_interval": 0.3,
+        "enter_auction_interval": 0.3,
         "load_cars_interval": 0.8,
+        "buy_result_retry_wait": 0.8,
     }
     is_valid, error_msg, corrected = settings.validate_settings(timings, 100)
     assert not is_valid
-    assert "Reset Interval" in error_msg
-    assert corrected["timings"]["reset_interval"] == 0.5
+    assert "Exit Auction Interval" in error_msg
+    assert "Enter Auction Interval" not in error_msg
+    assert corrected["timings"]["exit_auction_interval"] == 0.5
+    assert corrected["timings"]["enter_auction_interval"] == 0.3
+
+
+def test_migration_reset_interval_split():
+    """Old reset_interval migrates into both exit/enter auction intervals."""
+    old = {"TIMINGS": {"reset_interval": 0.77}}
+    with open(settings.CONFIG_FILE, "w") as f:
+        json.dump(old, f)
+    cfg = settings.load_config()
+    assert cfg["TIMINGS"]["exit_auction_interval"] == 0.77
+    assert cfg["TIMINGS"]["enter_auction_interval"] == 0.77
+    # deprecated key should have been dropped from the saved file
+    with open(settings.CONFIG_FILE) as f:
+        data = json.load(f)
+    assert "reset_interval" not in data["TIMINGS"]
 
 
 def test_validate_load_cars_interval_too_high():
@@ -201,8 +233,10 @@ def test_validate_load_cars_interval_too_high():
         "nav_interval": 0.1,
         "confirm_buy_interval": 0.1,
         "post_buy_wait": 5.0,
-        "reset_interval": 0.8,
+        "exit_auction_interval": 0.8,
+        "enter_auction_interval": 0.8,
         "load_cars_interval": 25.0,
+        "buy_result_retry_wait": 0.8,
     }
     is_valid, error_msg, corrected = settings.validate_settings(timings, 100)
     assert not is_valid
@@ -217,8 +251,10 @@ def test_validate_multiple_interval_errors():
         "nav_interval": 0.1,
         "confirm_buy_interval": 0.1,
         "post_buy_wait": 25.0,
-        "reset_interval": 0.8,
+        "exit_auction_interval": 0.8,
+        "enter_auction_interval": 0.8,
         "load_cars_interval": 0.8,
+        "buy_result_retry_wait": 0.8,
     }
     is_valid, error_msg, corrected = settings.validate_settings(timings, 100)
     assert not is_valid
@@ -235,8 +271,10 @@ def test_validate_scans_too_low():
         "nav_interval": 0.1,
         "confirm_buy_interval": 0.1,
         "post_buy_wait": 5.0,
-        "reset_interval": 0.8,
+        "exit_auction_interval": 0.8,
+        "enter_auction_interval": 0.8,
         "load_cars_interval": 0.8,
+        "buy_result_retry_wait": 0.8,
     }
     is_valid, error_msg, corrected = settings.validate_settings(timings, -100)
     assert not is_valid
@@ -251,8 +289,10 @@ def test_validate_scans_too_high():
         "nav_interval": 0.1,
         "confirm_buy_interval": 0.1,
         "post_buy_wait": 5.0,
-        "reset_interval": 0.8,
+        "exit_auction_interval": 0.8,
+        "enter_auction_interval": 0.8,
         "load_cars_interval": 0.8,
+        "buy_result_retry_wait": 0.8,
     }
     is_valid, error_msg, corrected = settings.validate_settings(timings, 1_100_000)
     assert not is_valid
@@ -269,7 +309,8 @@ def test_load_config_auto_fixes_bad_intervals():
             "nav_interval": 0.1,
             "confirm_buy_interval": 0.1,
             "post_buy_wait": 0.01,  # too low
-            "reset_interval": 0.8,
+            "exit_auction_interval": 0.8,
+            "enter_auction_interval": 0.8,
             "load_cars_interval": 0.8,
         },
     }
@@ -288,7 +329,7 @@ def test_load_config_auto_fixes_bad_intervals():
 
 
 def test_load_config_auto_fixes_reset_below_floor_but_not_load_cars():
-    """load_config enforces reset_interval's 0.5s floor but load_cars_interval has none."""
+    """load_config enforces the exit/enter 0.5s floors but load_cars_interval has none."""
     bad_config = {
         "scans": 500,
         "TIMINGS": {
@@ -296,7 +337,8 @@ def test_load_config_auto_fixes_reset_below_floor_but_not_load_cars():
             "nav_interval": 0.1,
             "confirm_buy_interval": 0.1,
             "post_buy_wait": 5.0,
-            "reset_interval": 0.2,  # above MIN_INTERVAL but below the 0.5s floor
+            "exit_auction_interval": 0.2,  # above MIN_INTERVAL but below the 0.5s floor
+            "enter_auction_interval": 0.2,  # valid while its floor is lifted for testing
             "load_cars_interval": 0.2,  # valid as-is, no floor to enforce
         },
     }
@@ -304,8 +346,46 @@ def test_load_config_auto_fixes_reset_below_floor_but_not_load_cars():
         json.dump(bad_config, f)
 
     cfg = settings.load_config()
-    assert cfg["TIMINGS"]["reset_interval"] == 0.5
+    assert cfg["TIMINGS"]["exit_auction_interval"] == 0.5
+    assert cfg["TIMINGS"]["enter_auction_interval"] == 0.2
     assert cfg["TIMINGS"]["load_cars_interval"] == 0.2
+
+
+def test_buy_last_available_round_trip():
+    """BUY_LAST_AVAILABLE defaults to True and persists when toggled."""
+    assert settings.get_buy_last_available() is True
+    settings.set_buy_last_available(False)
+    assert settings.get_buy_last_available() is False
+    with open(settings.CONFIG_FILE) as f:
+        saved = json.load(f)
+    assert saved["BUY_LAST_AVAILABLE"] is False
+
+
+def test_show_ingame_overlay_round_trip():
+    """SHOW_INGAME_OVERLAY defaults to False and persists when toggled."""
+    assert settings.get_show_ingame_overlay() is False
+    settings.set_show_ingame_overlay(True)
+    assert settings.get_show_ingame_overlay() is True
+    with open(settings.CONFIG_FILE) as f:
+        saved = json.load(f)
+    assert saved["SHOW_INGAME_OVERLAY"] is True
+
+
+def test_buy_result_retry_wait_survives_load_config():
+    """buy_result_retry_wait is a known timing key — it must not be stripped as deprecated."""
+    cfg_in = {
+        "scans": 500,
+        "TIMINGS": {**settings.DEFAULT_TIMINGS, "buy_result_retry_wait": 1.5},
+    }
+    with open(settings.CONFIG_FILE, "w") as f:
+        json.dump(cfg_in, f)
+
+    cfg = settings.load_config()
+    assert cfg["TIMINGS"]["buy_result_retry_wait"] == 1.5
+    # and it must still be in the file (not rewritten away)
+    with open(settings.CONFIG_FILE) as f:
+        saved = json.load(f)
+    assert saved.get("TIMINGS", {}).get("buy_result_retry_wait", 1.5) == 1.5
 
 
 def test_load_config_auto_fixes_bad_scans():

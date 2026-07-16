@@ -6,8 +6,8 @@ Windows automation tool that snipers cars in the Forza Horizon 6 auction house u
 template matching. Detects UI buttons via screenshot analysis and fires buy sequences via
 keyboard automation.
 
-**Platform:** Windows only (uses pywin32 for DPI scaling and foreground window detection).
-**UI framework:** ttkbootstrap (Tkinter) now, migrating to PySide6 (tracked in GitHub issues).
+**Platform:** Windows only (DPI scaling and foreground-window detection via ctypes/Win32).
+**UI framework:** PySide6 (the ttkbootstrap → PySide6 migration is complete).
 
 ---
 
@@ -49,19 +49,27 @@ CI enforces the same checks on every push.
 ## Architecture
 
 ```
-app.py            GUI entry point — ttkbootstrap tabs, start/stop, calibration wizard
+app.py            Thin PySide6 launcher (entry point; re-exports for tests)
+ui/               PySide6 GUI package
+  main_window.py    Main window and tab container
+  tabs/             Sniper, Settings, Calibration, Info, Guides tabs
+  overlays/         In-game HUD, calibration and region overlays
+  log_bridge.py     Thread-safe log signal bridge to the GUI
+  theme.py          Dark theme styling
 sniper.py         Core scan loop — detects button, fires buy sequence, tracks stats
 vision_utils.py   OpenCV engine — multi-scale template matching, screenshot capture
 calibrator.py     Calibration helpers — auto and manual region detection
-window_utils.py   FH6 window detection (pygetwindow), DPI scaling (pywin32), asset paths
-settings.py       Config file load/save (APPDATA/FH6Sniper/config.json)
-logger.py         Thread-safe logging to GUI widget + sniper.log file
+window_utils.py   FH6 window detection (pygetwindow), DPI scaling (ctypes), asset paths
+settings.py       Config file load/save + DEFAULT_TIMINGS (APPDATA/FH6Sniper/config.json)
+row_tuner.py      Interactive row-region tuning tool
 ```
 
 ## Assets
 
-`assets/` holds 9 PNG templates (3 UI states × 3 window sizes: full / med / small).
-If you replace a full-size template, regenerate the variants — see `docs/plan.md`.
+`assets/` holds 13 PNG templates across 4 families (auction options ×2 backgrounds,
+buyout success/fail, sold badge), each with size variants (full / `_med` /
+`_1024x768` where present). If you replace a full-size template, regenerate the
+variants.
 
 ---
 
@@ -127,6 +135,20 @@ the fix belongs in `vision_utils.grab_full_screen()`, not in detection logic.
 
 ## Active Work
 
-See GitHub issues for the current roadmap. Major upcoming change: PySide6 UI migration
-(issues #4–#9). Keep new code compatible with both ttkbootstrap and PySide6 if possible,
-or clearly scope it to one.
+See GitHub issues for the current roadmap. The PySide6 UI migration (issues #4–#9)
+is complete — all new UI code is PySide6.
+
+## Performance Rules
+
+Speed is the product — the sniper races other players to buy cars. When touching
+the scan loop or buy sequence:
+
+- `pyautogui.PAUSE` is set to 0 in sniper.py; all inter-key timing must be explicit
+  via `stop_event.wait(...)` with configurable intervals. Never rely on implicit
+  pauses, and never use `pyautogui.typewrite(interval=...)` (it sleeps after the
+  last key and can't be interrupted by stop_event).
+- Nothing in the per-scan or per-row path may read a file or enumerate windows
+  unnecessarily — config.json and row-tuning JSON are mtime-cached, templates are
+  cached in vision_utils, candidate lists are hoisted out of loops. Keep it that way.
+- Timing defaults live ONLY in `settings.DEFAULT_TIMINGS`; the sold-badge threshold
+  lives ONLY in `vision_utils.SOLD_THRESHOLD`. Never introduce a second copy.

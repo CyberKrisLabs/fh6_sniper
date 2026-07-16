@@ -64,6 +64,56 @@ class _FakeScreen:
         return self
 
 
+def _patch_rows(monkeypatch, sold_scores):
+    """Make every row look occupied, with the given per-row sold scores."""
+    monkeypatch.setattr(vision_utils, "row_has_car", lambda region, row_img=None: True)
+    monkeypatch.setattr(vision_utils, "build_sold_candidates", lambda tpl, w: [tpl])
+    scores = list(sold_scores)
+    monkeypatch.setattr(
+        vision_utils,
+        "sold_badge_score",
+        lambda region, params, tpl, row_img=None, candidates=None: scores.pop(0),
+    )
+
+
+def test_find_available_row_buy_last_targets_last(monkeypatch):
+    _patch_rows(monkeypatch, [0.0, 0.0, 0.0])  # three available rows
+    rows = [(0, 0, 100, 50), (0, 50, 100, 50), (0, 100, 100, 50)]
+    idx, saw_car = sniper.find_available_row(
+        rows,
+        {"badge_x_pct": 0},
+        window_utils.resource_path("assets/sold_badge_template.png"),
+        full_img=_FakeScreen(),
+        buy_last=True,
+    )
+    assert idx == 2
+    assert saw_car
+
+
+def test_find_available_row_buy_first_stops_early(monkeypatch):
+    calls = []
+
+    def counting_score(region, params, tpl, row_img=None, candidates=None):
+        calls.append(region)
+        return 0.9 if len(calls) == 1 else 0.0  # row 1 sold, rest available
+
+    monkeypatch.setattr(vision_utils, "row_has_car", lambda region, row_img=None: True)
+    monkeypatch.setattr(vision_utils, "build_sold_candidates", lambda tpl, w: [tpl])
+    monkeypatch.setattr(vision_utils, "sold_badge_score", counting_score)
+
+    rows = [(0, 0, 100, 50), (0, 50, 100, 50), (0, 100, 100, 50)]
+    idx, saw_car = sniper.find_available_row(
+        rows,
+        {"badge_x_pct": 0},
+        window_utils.resource_path("assets/sold_badge_template.png"),
+        full_img=_FakeScreen(),
+        buy_last=False,
+    )
+    assert idx == 1  # first available (row 2, 0-based 1)
+    assert saw_car
+    assert len(calls) == 2  # row 3 was never checked
+
+
 def test_reset_search(monkeypatch):
     calls = []
 

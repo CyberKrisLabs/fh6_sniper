@@ -1,8 +1,8 @@
 """Detection test tool for FH6 auction rows.
 
 Captures all 4 row regions and runs the same detection logic the sniper uses:
-  1. row_has_car()  — brightness threshold to tell empty slot from car card
-  2. detect_sold()  — template match for the "Sold!" badge
+  1. row_has_car()      — brightness threshold to tell empty slot from car card
+  2. sold_badge_score() — OCR + template match for the "Sold!" badge
 
 Shows a thumbnail and result for each row so you can verify detection works
 and tune the threshold / confidence before running the sniper for real.
@@ -240,10 +240,11 @@ class DetectionTestWindow(QWidget):
         self.conf.setRange(0.1, 1.0)
         self.conf.setSingleStep(0.01)
         self.conf.setDecimals(2)
-        self.conf.setValue(0.72)
+        self.conf.setValue(vision_utils.SOLD_THRESHOLD)
         self.conf.setFixedWidth(68)
         self.conf.setToolTip(
             "Template-match threshold for the Sold! badge.\n"
+            "Defaults to the live sniper's threshold (vision_utils.SOLD_THRESHOLD).\n"
             "Lower → more sensitive (more false positives).\n"
             "Raise → stricter (may miss faint badges)."
         )
@@ -252,7 +253,7 @@ class DetectionTestWindow(QWidget):
         self.sold_cb = QCheckBox("Check sold badge")
         self.sold_cb.setChecked(True)
         self.sold_cb.setToolTip(
-            "Run detect_sold() on rows with a car.\nUncheck for a faster brightness-only scan."
+            "Run sold-badge detection on rows with a car.\nUncheck for a faster brightness-only scan."
         )
         cfg.addSpacing(16)
         cfg.addWidget(self.sold_cb)

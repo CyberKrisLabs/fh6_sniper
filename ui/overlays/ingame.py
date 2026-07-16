@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import os
 import time
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -27,8 +25,6 @@ if TYPE_CHECKING:
 
 class _IngameOverlay(QWidget):
     """Frameless in-game header overlay shown on top of the FH6 window."""
-
-    _calib_img_signal = Signal(str)
 
     def __init__(self, sniper_tab: SniperTab) -> None:
         super().__init__(
@@ -143,11 +139,6 @@ class _IngameOverlay(QWidget):
         msg_row = QHBoxLayout()
         msg_row.setSpacing(8)
 
-        self._calib_img_label = QLabel()
-        self._calib_img_label.setVisible(False)
-        self._calib_img_label.setStyleSheet("background: transparent;")
-        msg_row.addWidget(self._calib_img_label)
-
         self._message_label = QLabel("")
         self._message_label.setStyleSheet(
             "font-size: 10pt; color: #ffffff; background-color: rgba(0,0,0,0.65); "
@@ -158,26 +149,8 @@ class _IngameOverlay(QWidget):
         msg_row.addWidget(self._message_label, stretch=1)
         self._layout.addLayout(msg_row)
 
-        self._calib_img_signal.connect(self._on_calib_img)
         self._calib_status_proxy = _QtCalibrationStatusProxy(self._message_label)
         self._update_controls()
-
-    def _on_calib_img(self, path: str) -> None:
-        if path and os.path.isfile(path):
-            pix = QPixmap(path).scaledToHeight(34, Qt.TransformationMode.SmoothTransformation)
-            self._calib_img_label.setPixmap(pix)
-            self._calib_img_label.setVisible(True)
-        else:
-            self._calib_img_label.clear()
-            self._calib_img_label.setVisible(False)
-
-    def show_calib_image(self, path: str) -> None:
-        """Show a template image in the log row (thread-safe)."""
-        self._calib_img_signal.emit(path)
-
-    def hide_calib_image(self) -> None:
-        """Hide the template image from the log row (thread-safe)."""
-        self._calib_img_signal.emit("")
 
     def _launch_row_tuner_from_overlay(self) -> None:
         calib_tab = self._sniper_tab._calib_tab
@@ -294,8 +267,9 @@ class _IngameOverlay(QWidget):
         if getattr(self._sniper_tab, "_ingame_overlay", None) is self:
             self._sniper_tab._ingame_overlay = None
             if getattr(self, "_user_closed", False):
-                self._sniper_tab.ingame_overlay_btn.setChecked(False)
-                self._sniper_tab.ingame_overlay_btn.setText("Show In-game Overlay")
+                # Hide clicked on the overlay itself — persist the setting off
+                # and untick the Settings tab box.
+                self._sniper_tab.overlay_hidden_by_user()
         if getattr(self, "_log_bridge_connected", False):
             try:
                 _log_bridge.message.disconnect(self._on_log_message)

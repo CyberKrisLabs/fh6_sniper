@@ -36,7 +36,7 @@ Every keystroke is gated behind a focus check — if FH6 loses focus, the sniper
 |---|---|
 | Auto & Manual Calibration | Pinpoints the exact screen region to watch for maximum speed |
 | Multi-scale Detection | Finds buttons at any window size using 24-step scale search |
-| Timing Presets | Fast / Mid / Slow presets tuned for different PC and connection speeds |
+| Timing Presets | Faster / Fast / Mid / Slow presets tuned for different PC and connection speeds |
 | Focus Safety | Stops sending keystrokes the moment FH6 is no longer the active window |
 | In-game Overlay | Frameless always-on-top HUD showing live stats without alt-tabbing |
 | Live Stats | Tracks buy attempts, successes, failures, and refreshes in real time |
@@ -47,19 +47,21 @@ Every keystroke is gated behind a focus check — if FH6 loses focus, the sniper
 
 ## Timing Presets
 
-| Preset | Car Available | Nav Interval | Confirm Buy | Post-buy Wait | Reset Interval | Load Cars | Best For |
-|---|---|---|---|---|---|---|---|
-| Fast | 0.3 s | 0.2 s | 0.25 s | 4.0 s | 0.625 s | 0.7 s | High-end PC, fast connection |
-| Mid | 0.5 s | 0.3 s | 0.35 s | 5.0 s | 0.8 s | 0.8 s | Average PC, stable connection |
-| Slow | 0.7 s | 0.6 s | 0.65 s | 6.0 s | 1.1 s | 1.1 s | Slower PC or laggy connection |
-| Custom | — | — | — | — | — | — | Manual control over each value |
+| Preset | Car Available | Nav Interval | Confirm Buy | Post-buy Wait | Exit Auction | Enter Auction | Load Cars | Best For |
+|---|---|---|---|---|---|---|---|---|
+| Faster | 0.25 s | 0.25 s | 0.25 s | 4.0 s | 0.7 s | 0.25 s | 0.75 s | High-end PC, very fast connection |
+| Fast | 0.4 s | 0.3 s | 0.35 s | 4.0 s | 0.725 s | 0.3 s | 0.8 s | High-end PC, fast connection |
+| Mid | 0.6 s | 0.4 s | 0.45 s | 5.0 s | 0.9 s | 0.4 s | 0.9 s | Average PC, stable connection |
+| Slow | 0.8 s | 0.7 s | 0.75 s | 6.0 s | 1.2 s | 0.7 s | 1.2 s | Slower PC or laggy connection |
+| Custom | — | — | — | — | — | — | — | Manual control over each value |
 
 - **Car Available** — wait after pressing Y for the buy dialog to render.
 - **Nav Interval** — delay between up/down key presses only (row navigation, buy dialog down-arrow).
 - **Confirm Buy** — delay between the two Enter presses that confirm a purchase.
 - **Post-buy Wait** — wait after the buy sequence to check whether the purchase succeeded.
-- **Reset Interval** — delay after Escape and after the first Enter of the reset sequence: Escape → wait → Enter → wait → Enter.
-- **Load Cars** — delay after that final Enter, while the auction list actually reloads before the next scan. Defaults to match Reset Interval (matching the original combined timing).
+- **Exit Auction** — delay after Escape backs out of the auction screen: Escape → **this wait** → Enter → … The screen transition out takes longer than the Enters that follow, so it has its own interval.
+- **Enter Auction** — delay after the first Enter that re-opens the auction search: … Enter → **this wait** → Enter. Menu confirmations register faster than the Escape transition, so this can usually be tuned lower.
+- **Load Cars** — delay after that final Enter, while the auction list actually reloads before the next scan.
 
 ---
 
@@ -83,7 +85,7 @@ pyinstaller "FH6 Sniper.spec"
 
 Output: `dist\FH6 Sniper.exe`
 
-The spec file already includes the correct icon, assets, docs, and hidden imports for pywin32. Asset paths are resolved at runtime via `window_utils.resource_path`, which handles both normal Python execution and the PyInstaller bundle.
+The spec file already includes the correct icon, assets, and hidden imports. Asset paths are resolved at runtime via `window_utils.resource_path`, which handles both normal Python execution and the PyInstaller bundle. (`docs/` is deliberately not bundled — calibration data files are created in `%APPDATA%\FH6Sniper` on first use.)
 
 ---
 

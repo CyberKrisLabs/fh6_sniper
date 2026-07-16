@@ -25,11 +25,6 @@ a = Analysis(
         ("assets", "assets"),
     ],
     hiddenimports=[
-        "win32api",
-        "win32con",
-        "win32gui",
-        "win32process",
-        "win32print",
         # winrt OCR — imports are inside try/except so PyInstaller can't see them
         "winrt._winrt",
         "winrt._winrt_windows_foundation",
@@ -50,8 +45,6 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # not used in the app — update check is try/except optional
-        "requests",
         # we use PySide6, not tkinter (tkinter only appears in tools/shadow_mode.py)
         "tkinter",
         "_tkinter",

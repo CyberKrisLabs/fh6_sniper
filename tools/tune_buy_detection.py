@@ -20,7 +20,6 @@ Usage:
     4. Adjust threshold or region if needed, then capture again.
 """
 
-import json
 import os
 import signal
 import subprocess
@@ -51,45 +50,15 @@ import window_utils
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOCS = os.path.join(ROOT, "docs")
-CONFIG_FILE = window_utils.get_config_file()
 
 SUCC_BASE = window_utils.resource_path("assets/buyout_successful_template.png")
 FAIL_BASE = window_utils.resource_path("assets/buyout_failed_template.png")
-
-REGION_KEY = "BUY_RESULT_REGION"
 
 
 def _asset_variants(base: str) -> list[str]:
     """Return [full, med] variants only — small is excluded because it
     matches unrelated corner UI elements at ~0.81 regardless of content."""
     return [p for p in [base, base.replace(".png", "_med.png")] if os.path.isfile(p)]
-
-
-# ── Config helpers ────────────────────────────────────────────────────────────
-
-
-def _load_region() -> tuple[int, int, int, int] | None:
-    try:
-        with open(CONFIG_FILE) as f:
-            d = json.load(f)
-        r = d.get(REGION_KEY)
-        return tuple(r) if r else None
-    except Exception:
-        return None
-
-
-def _save_region_to_config(region: tuple[int, int, int, int]) -> None:
-    try:
-        try:
-            with open(CONFIG_FILE) as f:
-                d = json.load(f)
-        except Exception:
-            d = {}
-        d[REGION_KEY] = list(region)
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(d, f, indent=2)
-    except Exception as e:
-        print(f"Failed to save region: {e}")
 
 
 # ── Screen capture ────────────────────────────────────────────────────────────
@@ -277,18 +246,10 @@ class ControlPanel(QWidget):
         self._dpr = QApplication.primaryScreen().devicePixelRatio()
         self._busy = False
 
-        # Region in logical Qt pixels (None = full FH6 window)
-        saved = _load_region()
-        if saved:
-            sx, sy, sw, sh = saved
-            self._region: tuple[int, int, int, int] | None = (
-                int(sx / self._dpr),
-                int(sy / self._dpr),
-                int(sw / self._dpr),
-                int(sh / self._dpr),
-            )
-        else:
-            self._region = None
+        # Region in logical Qt pixels (None = full FH6 window). Session-local
+        # only — the sniper always matches the center 2/3 of the window, so
+        # persisting a custom region to config would have no runtime effect.
+        self._region: tuple[int, int, int, int] | None = None
 
         self._threshold = 0.72
         self._show_succ = True
@@ -418,11 +379,7 @@ class ControlPanel(QWidget):
         region_btn_row = QHBoxLayout()
         reset_btn = QPushButton("Use full window")
         reset_btn.clicked.connect(self._reset_region)
-        save_region_btn = QPushButton("Save region ✓")
-        save_region_btn.setStyleSheet("font-weight: bold;")
-        save_region_btn.clicked.connect(self._save_region)
         region_btn_row.addWidget(reset_btn)
-        region_btn_row.addWidget(save_region_btn)
         region_layout.addLayout(region_btn_row)
         root.addWidget(region_box)
 
@@ -489,15 +446,6 @@ class ControlPanel(QWidget):
         self._update_region_label()
         self._overlay._region = None
         self._overlay.update()
-
-    def _save_region(self) -> None:
-        if self._region is None:
-            self._status_label.setText("⚠ No custom region — nothing to save")
-            return
-        x, y, w, h = self._region
-        phys = (int(x * self._dpr), int(y * self._dpr), int(w * self._dpr), int(h * self._dpr))
-        _save_region_to_config(phys)
-        self._status_label.setText(f"✅ Saved BUY_RESULT_REGION {phys}")
 
     def _update_region_label(self) -> None:
         if self._region is None:

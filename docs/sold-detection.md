@@ -90,16 +90,21 @@ Per-row tuning (`docs/row_regions_tuned.json`) applies the same DPR correction i
 
 ## Per-Row Scan Logic
 
-For each visible row (top to bottom):
+For each visible row (top to bottom), `sniper.find_available_row()`:
 
 1. **Is a car present?** — `row_has_car(region)`: mean brightness of row screenshot
    below threshold → empty placeholder → stop scanning.
-2. **Is the car sold?** — `detect_sold(row_region, badge_params, template_path)`:
-   template match for the "Sold!" badge in the badge sub-region.
-3. **Car is available** → proceed with buy sequence.
+2. **Is the car sold?** — `sold_badge_score(row_region, badge_params, template_path)`:
+   yellow-color gate → Windows OCR (reads "SOLD", returns 1.0) → multi-scale template
+   match fallback. Score ≥ `vision_utils.SOLD_THRESHOLD` (0.68) → sold.
+3. **Available rows** are collected; by default the sniper buys the **last**
+   available row (less competition than row 1), navigating down to it with
+   arrow keys. The "Buy last available row" setting can switch this to the
+   first available row for a slightly faster (but more contested) attempt.
 
-If rows 1–4 are all sold, press **arrow down** once per row (capped at 8 scrolls) to bring
-the next car into view.
+If every visible row is sold (or row 1 never rendered), the sniper runs a full
+`reset_search()` — Esc → Enter → Enter — to reload the auction list. There is no
+scrolling past row 4.
 
 ---
 
@@ -107,8 +112,10 @@ the next car into view.
 
 ### Template
 
-`assets/sold_badge_template.png` (+ `_med`, `_small` variants) — real game screenshots of
-the yellow "SOLD!" badge. Committed to the repo; no in-app capture needed.
+`assets/sold_badge_template.png` (+ `_med`, `_1024x768` variants) — real game screenshots of
+the yellow "SOLD!" badge. Committed to the repo; no in-app capture needed. (Auto-calibration
+may additionally save a pixel-captured template, referenced by the config key
+`CAPTURED_SOLD_BADGE_TEMPLATE`, which is tried first.)
 
 To regenerate variants if the template is replaced:
 ```python
@@ -116,7 +123,7 @@ from PIL import Image
 img = Image.open("assets/sold_badge_template.png")
 w, h = img.size
 img.resize((int(w * 0.60), int(h * 0.60)), Image.LANCZOS).save("assets/sold_badge_template_med.png")
-img.resize((int(w * 0.36), int(h * 0.36)), Image.LANCZOS).save("assets/sold_badge_template_small.png")
+img.resize((int(w * 0.36), int(h * 0.36)), Image.LANCZOS).save("assets/sold_badge_template_1024x768.png")
 ```
 
 ### Badge position (`docs/sold_badge_region.json`)
@@ -129,7 +136,7 @@ the badge as fractions of the row's physical dimensions.
 The overlay tool draws in Qt logical pixels but the row dimensions it receives from
 `pygetwindow` are physical. This means the badge offset values (`badge_dx_px`,
 `badge_dy_px`) are in logical pixels while `row_ref_px` dimensions are physical — a mixed
-unit. `detect_sold()` currently applies the percentages directly (no DPR correction) because
+unit. `sold_badge_score()` currently applies the percentages directly (no DPR correction) because
 `get_row_regions()` now returns correct physical rows, and the percentage round-trip
 (logical_offset / physical_dim × physical_dim) happens to give approximately the right
 physical position for the badge.
@@ -140,7 +147,10 @@ offsets in physical pixels (multiply arrow-key steps by DPR before saving).
 
 ### Confidence threshold
 
-Default: **0.65**. Below 0.65 → badge not detected, row treated as available.
+`vision_utils.SOLD_THRESHOLD` = **0.68** (single authoritative constant — sniper.py
+re-exports it; calibration and the tuning tools import it). Score below the threshold →
+badge not detected, row treated as available. A Windows-OCR "SOLD" read scores an
+exact 1.0.
 
 If confidence is consistently low (< 0.6), the likely causes are:
 1. Wrong row coordinates (DPR not applied — see above)
@@ -154,8 +164,8 @@ If confidence is consistently low (< 0.6), the likely causes are:
 | File | Role |
 |---|---|
 | `window_utils.py` | `get_row_regions()`, `get_tuned_row_regions()`, `_get_display_dpr()` |
-| `vision_utils.py` | `row_has_car()`, `detect_sold()` |
-| `sniper.py` | `find_last_available_row()` — iterates rows, calls both detectors |
+| `vision_utils.py` | `row_has_car()`, `sold_badge_score()`, `SOLD_THRESHOLD` |
+| `sniper.py` | `find_available_row()` — iterates rows, calls both detectors |
 | `assets/sold_badge_template*.png` | Badge templates (committed, real game captures) |
 | `docs/sold_badge_region.json` | Badge scan sub-region percentages within a row |
 | `docs/row_regions_tuned.json` | Per-row tuning overrides (written by `tune_rows.py`) |

@@ -3,8 +3,6 @@ from __future__ import annotations
 import builtins
 import json
 import os
-import subprocess
-import sys
 import threading
 import time
 from typing import TYPE_CHECKING
@@ -16,7 +14,6 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QTabWidget,
     QVBoxLayout,
@@ -622,16 +619,6 @@ class CalibrationTab(QWidget):
         else:
             _emit_log("❌ Could not save badge region — is FH6 running?")
             return "⚠️ Badge region failed — make sure FH6 is open and try again"
-
-    @staticmethod
-    def _launch_badge_tool(parent_dialog=None):
-        root = os.path.dirname(os.path.abspath(__file__))
-        root = os.path.dirname(os.path.dirname(root))
-        script = os.path.join(root, "tools", "measure_sold_region.py")
-        if os.path.isfile(script):
-            subprocess.Popen([sys.executable, script])
-        else:
-            QMessageBox.warning(parent_dialog, "Not Found", f"Script not found:\n{script}")
 
     def _remove_auto(self):
         calibrator.reset_auto_region()

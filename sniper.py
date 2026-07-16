@@ -14,6 +14,7 @@ import time
 import pyautogui
 
 import calibrator
+import settings
 import vision_utils
 import window_utils
 
@@ -22,39 +23,39 @@ import window_utils
 # message wasn't user-friendly in normal operation.
 pyautogui.FAILSAFE = False
 
-# Base confidence used for auto-calibrated templates. Other call sites
-# already use lower, tuned thresholds (~0.65–0.72); 0.8 was too strict here.
-CONFIDENCE = 0.7
-SOLD_THRESHOLD = 0.68
+# PyAutoGUI sleeps PAUSE seconds (default 0.1) after every press/typewrite
+# call. All our inter-key timing is explicit via stop_event.wait/config
+# intervals, so the implicit pause only adds hidden, untunable latency.
+pyautogui.PAUSE = 0
+
+# Re-exported from vision_utils (its authoritative home) for existing
+# importers (ui.tabs.calibration, tools).
+SOLD_THRESHOLD = vision_utils.SOLD_THRESHOLD
 CONFIG_FILE = window_utils.get_config_file()
 
 # -------------------------
 # CONFIG HELPERS
 # -------------------------
 
-DEFAULT_TIMINGS = {
-    # pause after pressing "y" while the buy dialog renders
-    "car_available_interval": 0.4,
-    # delay between up/down key presses only (row navigation, buy dialog
-    # down-arrow) — can be faster since nothing needs to load
-    "nav_interval": 0.3,
-    # pause between the two Enter presses that confirm the purchase — slightly
-    # higher than nav_interval since confirming is a bit more failure-sensitive
-    # than plain navigation, but still faster than car_available_interval
-    "confirm_buy_interval": 0.35,
-    "post_buy_wait": 5.0,
-    # pause after Escape and after the first Enter of the reset sequence
-    # (esc -> pause -> enter -> pause -> enter)
-    "reset_interval": 0.8,
-    # pause after the final Enter of the reset sequence, while the list loads —
-    # defaults to match reset_interval so the total matches the original
-    # single-value reset_interval timing; lower it if your connection is fast
-    "load_cars_interval": 0.8,
-}
+# Single source of truth for timing defaults lives in settings.py; the
+# .get() fallbacks throughout this module reference the same dict.
+DEFAULT_TIMINGS = settings.DEFAULT_TIMINGS
+
+
+# Parsed config cached by file mtime — car_available() runs every scan and
+# the config only changes when the user saves settings or recalibrates.
+_config_cache: dict = {"mtime": None, "data": None}
 
 
 def load_config():
-    """Load config with safe defaults."""
+    """Load config with safe defaults (cached until config.json changes)."""
+    try:
+        mtime = os.path.getmtime(CONFIG_FILE)
+    except OSError:
+        mtime = None
+    if mtime is not None and _config_cache["mtime"] == mtime:
+        return _config_cache["data"]
+
     try:
         with open(CONFIG_FILE) as f:
             data = json.load(f)
@@ -66,6 +67,8 @@ def load_config():
     if "TIMINGS" not in data:
         data["TIMINGS"] = DEFAULT_TIMINGS.copy()
 
+    _config_cache["mtime"] = mtime
+    _config_cache["data"] = data
     return data
 
 
@@ -91,7 +94,7 @@ def load_badge_params(win_w: int | None = None, win_h: int | None = None) -> dic
 # -------------------------
 
 
-def car_available(region, test=False, full_img=None):
+def car_available(region, full_img=None):
     """
     Check if the 'Auction Options' button is available using image detection.
 
@@ -110,20 +113,6 @@ def car_available(region, test=False, full_img=None):
                 print("WARNING: No detection region available")
                 return False
 
-        # determine which template to use based on the *full* window size.
-        # the caller usually passes a cropped region (bottom-left quarter) so
-        # using that directly would misclassify the window as "small".  we
-        # still keep `region` unchanged for the actual screenshot search.
-        win = window_utils.get_fh6_window()
-        if win:
-            full_window_region = window_utils.get_window_region(win)
-        else:
-            full_window_region = None
-
-        # use the window region for template decisions; fall back to provided
-        # region only when the window can't be located.
-        size_region = full_window_region if full_window_region is not None else region
-
         # Check if we have calibrated data that allows us to skip variants.
         # IMPORTANT: manual calibration should always take precedence over auto.
         cfg = load_config()
@@ -135,7 +124,16 @@ def car_available(region, test=False, full_img=None):
             if "AUTO_AUCTION_OPTIONS_REGION" in cfg
             else None
         )
-        auto_template_info = calibrator.load_auto_template_info()
+        # Auto-calibrated template path + scale, read from the same cached
+        # config (old keys kept for backward compatibility). Previously this
+        # was a second config.json disk read on every scan.
+        auto_tpl_path = cfg.get("AUTO_AUCTION_OPTIONS_TEMPLATE") or cfg.get("AUTO_TEMPLATE_PATH")
+        auto_tpl_scale = cfg.get("AUTO_AUCTION_OPTIONS_SCALE") or cfg.get("AUTO_SCALE")
+        auto_template_info = (
+            (auto_tpl_path, auto_tpl_scale)
+            if auto_tpl_path and auto_tpl_scale is not None
+            else None
+        )
 
         # Define base template path for reuse. When FH6's "Moving Backgrounds"
         # accessibility setting is off, the Auction Options button has a plain
@@ -149,46 +147,24 @@ def car_available(region, test=False, full_img=None):
         base_template = window_utils.resource_path(f"assets/{auction_tpl_name}")
 
         # If the caller passed a shared full-screen grab, crop the button region
-        # from it so this call and find_last_available_row() operate on the same
+        # from it so this call and find_available_row() operate on the same
         # GPU frame — avoids the DXGI bad-frame inconsistency between two grabs.
         screenshot = None
         if full_img is not None and region is not None:
             rx, ry, rw, rh = region
             screenshot = full_img.crop((rx, ry, rx + rw, ry + rh))
 
-        # If we have manual calibration with saved template info, use it directly
+        # If we have a manually calibrated region, search it with the base
+        # template. The first hit caches a scale hint inside vision_utils, so
+        # subsequent scans only sweep a narrow window around it.
         if manual_region:
-            if test:
-                template_path = base_template
-                scale_min = 0.4
-                scale_max = 1
-                scale_steps = 24
-                confidence = 0.68
-            else:
-                manual_template_info = cfg.get("MANUAL_TEMPLATE_INFO", {})
-
-                template_path = manual_template_info.get("template_path", base_template)
-                scale = manual_template_info.get("scale")
-                confidence = manual_template_info.get("confidence", 0.68)
-
-                if scale is not None:
-                    scale_min = scale
-                    scale_max = scale
-                    scale_steps = 1
-                else:
-                    # fallback if config exists but scale missing
-                    scale_min = 0.4
-                    scale_max = 1
-                    scale_steps = 24
-
             location = vision_utils.locate_on_screen_with_variants(
-                template_path,
+                base_template,
                 region=region,
-                confidence=confidence,
-                scale_min=scale_min,
-                scale_max=scale_max,
-                scale_steps=scale_steps,
-                test=test,
+                confidence=0.68,
+                scale_min=0.4,
+                scale_max=1,
+                scale_steps=24,
                 screenshot=screenshot,
             )
             return location is not None
@@ -215,7 +191,16 @@ def car_available(region, test=False, full_img=None):
             )
             return location is not None
         else:
-            # No calibration - use the full variants approach
+            # No calibration - use the full variants approach.
+            # Determine which template to use based on the *full* window size:
+            # the caller usually passes a cropped region (bottom-left quarter)
+            # so using that directly would misclassify the window as "small".
+            # Only this uncalibrated branch needs the window lookup, so it
+            # happens here rather than on every scan for calibrated users.
+            win = window_utils.get_fh6_window()
+            full_window_region = window_utils.get_window_region(win) if win else None
+            size_region = full_window_region if full_window_region is not None else region
+
             _, size_cat = vision_utils.choose_template(
                 base_template,
                 region=size_region,
@@ -259,35 +244,58 @@ def car_available(region, test=False, full_img=None):
 # -------------------------
 
 
-def find_last_available_row(
+def find_available_row(
     row_regions: list,
     badge_params: dict | None,
     sold_template: str,
     log=None,
     full_img=None,
-) -> int:
-    """Scan all visible rows and return the 0-based index of the LAST available one.
+    buy_last: bool = True,
+) -> tuple[int, bool]:
+    """Scan visible rows and return the 0-based index of the row to buy.
 
     Scans purely by screenshot — no key presses.  The caller navigates to the
     returned row with arrow-down presses after this function returns.
 
     Stops scanning at the first empty row (no car), since rows below it will
-    also be empty.  Returns -1 if no available row is found.
+    also be empty.
 
-    Targeting the last available row gives a competitive edge: most snipers go
-    for row 1, so row 3 or 4 has less competition.
+    With buy_last=True (default), targets the LAST available row: most snipers
+    go for row 1, so row 3 or 4 has less competition.  With buy_last=False,
+    returns the FIRST available row immediately — a slightly faster attempt
+    (rows below it are never checked, fewer arrow-down presses) at the cost of
+    competing against the bots that always target the top row.
 
     Args:
         row_regions: list of (x, y, w, h) for each visible row.
         badge_params: dict from load_badge_params(), or None to skip sold detection.
         sold_template: absolute path to sold_badge_template.png.
+        buy_last: target the last available row (True) or the first (False).
+
+    Returns:
+        (available_idx, saw_any_car) — saw_any_car is False only when row 1
+        never rendered a car at all (still mid-load), which the caller uses to
+        avoid mislabeling that case as "all rows sold".
     """
     last_available = -1
+    saw_any_car = False
 
     # Use the caller-supplied frame when available so car_available() and this
     # function share one GPU grab. If not provided, capture one now.
     if full_img is None:
         full_img = vision_utils.grab_full_screen()
+
+    # Hoisted out of the per-row loop: the template existence check and the
+    # candidate list (which reads config.json) are identical for every row.
+    # active_badge_params is None when badge detection can't run at all.
+    active_badge_params = (
+        badge_params if badge_params is not None and os.path.isfile(sold_template) else None
+    )
+    sold_candidates = (
+        vision_utils.build_sold_candidates(sold_template, row_regions[0][2])
+        if active_badge_params is not None and row_regions
+        else None
+    )
 
     for idx, row_reg in enumerate(row_regions):
         rx, ry, rw, rh = row_reg
@@ -301,9 +309,14 @@ def find_last_available_row(
                 log(f"  Row {idx + 1}: empty — stop scanning")
             break
 
-        if badge_params and os.path.isfile(sold_template):
+        saw_any_car = True
+        if active_badge_params is not None:
             score = vision_utils.sold_badge_score(
-                row_reg, badge_params, sold_template, row_img=row_img
+                row_reg,
+                active_badge_params,
+                sold_template,
+                row_img=row_img,
+                candidates=sold_candidates,
             )
             if score >= SOLD_THRESHOLD:
                 if log:
@@ -315,13 +328,27 @@ def find_last_available_row(
             if log:
                 log(f"  Row {idx + 1}: available")
         last_available = idx
+        if not buy_last:
+            # First available row wins — skip checking the rows below it.
+            return last_available, saw_any_car
 
-    return last_available
+    return last_available, saw_any_car
 
 
 # -------------------------
 # ACTIONS
 # -------------------------
+
+
+# Buy-result detection tuning. HIGH_CONF is the unambiguous bar: a score
+# this strong can't be a cross-match of the other template, so scoring stops
+# immediately. Last winning (template, scale) is cached so retries and later
+# buys do one matchTemplate instead of re-sweeping every scale.
+BUY_RESULT_CONF = 0.80
+_BUY_RESULT_HIGH_CONF = 0.90
+_BUY_RESULT_SCALE_MIN = 0.5
+_BUY_RESULT_SCALE_STEPS = 18
+_buy_result_scale_hint: dict[str, float] = {}
 
 
 def _detect_buy_result(raw, full_region=None):
@@ -340,8 +367,7 @@ def _detect_buy_result(raw, full_region=None):
         def _variants(base: str) -> list[str]:
             return [p for p in [base, base.replace(".png", "_med.png")] if os.path.isfile(p)]
 
-        conf = 0.80
-        scale_min = 0.5
+        conf = BUY_RESULT_CONF
 
         if full_region is not None:
             rx, ry, rw, rh = full_region
@@ -355,26 +381,45 @@ def _detect_buy_result(raw, full_region=None):
         screen_gray = cv2.cvtColor(np.array(screen_pil), cv2.COLOR_RGB2GRAY)
         sh, sw = screen_gray.shape[:2]
 
+        def _match_at(tpl, scale) -> float:
+            rh2 = int(tpl.shape[0] * scale)
+            rw2 = int(tpl.shape[1] * scale)
+            if rh2 <= 0 or rw2 <= 0 or rh2 > sh or rw2 > sw:
+                return 0.0
+            resized = cv2.resize(tpl, (rw2, rh2), interpolation=cv2.INTER_AREA)
+            res = cv2.matchTemplate(screen_gray, resized, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, _ = cv2.minMaxLoc(res)
+            return float(max_val)
+
         def _score(tpl_paths: list[str]) -> float:
             best = 0.0
             for tpl_path in tpl_paths:
-                tpl = cv2.imread(tpl_path, cv2.IMREAD_GRAYSCALE)
-                if tpl is None:
+                try:
+                    tpl = vision_utils._load_template_gray(tpl_path)
+                except Exception:
                     continue
-                th, tw = tpl.shape[:2]
-                for scale in np.linspace(1.0, scale_min, 18):
-                    rh2 = int(th * scale)
-                    rw2 = int(tw * scale)
-                    if rh2 <= 0 or rw2 <= 0 or rh2 > sh or rw2 > sw:
-                        continue
-                    resized = cv2.resize(tpl, (rw2, rh2), interpolation=cv2.INTER_AREA)
-                    res = cv2.matchTemplate(screen_gray, resized, cv2.TM_CCOEFF_NORMED)
-                    _, max_val, _, _ = cv2.minMaxLoc(res)
-                    if max_val > best:
-                        best = max_val
+                # Cached winning scale first — retries and repeat buys hit
+                # this single match instead of the full sweep.
+                hint = _buy_result_scale_hint.get(tpl_path)
+                scales = np.linspace(1.0, _BUY_RESULT_SCALE_MIN, _BUY_RESULT_SCALE_STEPS)
+                if hint is not None:
+                    scales = np.concatenate(([hint], scales))
+                for scale in scales:
+                    val = _match_at(tpl, scale)
+                    if val > best:
+                        best = val
+                    if val >= conf:
+                        _buy_result_scale_hint[tpl_path] = scale
+                        if val >= _BUY_RESULT_HIGH_CONF:
+                            return best
             return best
 
+        # Success first: a high-confidence success match skips fail scoring
+        # entirely (the two screens are never shown at once).
         succ_score = _score(_variants(base_succ))
+        if succ_score >= _BUY_RESULT_HIGH_CONF:
+            print(f"Buy detection: success={succ_score:.3f} (high-confidence)")
+            return True
         fail_score = _score(_variants(base_fail))
 
         print(f"Buy detection: success={succ_score:.3f}  fail={fail_score:.3f}  threshold={conf}")
@@ -411,15 +456,22 @@ def buy_sequence(t, full_region=None, stop_event=None, log=None):
     _sleep = stop_event.wait if stop_event is not None else time.sleep
 
     pyautogui.press("y")
-    car_available_interval = t.get("car_available_interval", 0.4)
+    car_available_interval = t.get(
+        "car_available_interval", DEFAULT_TIMINGS["car_available_interval"]
+    )
     _sleep(car_available_interval)
 
-    nav_interval = t.get("nav_interval", 0.3)
+    nav_interval = t.get("nav_interval", DEFAULT_TIMINGS["nav_interval"])
     pyautogui.press("down")
     _sleep(nav_interval)
 
-    confirm_buy_interval = t.get("confirm_buy_interval", 0.35)
-    pyautogui.typewrite(["\n", "\n"], interval=confirm_buy_interval)
+    # Explicit press + wait instead of typewrite(interval=...): typewrite also
+    # sleeps after the LAST key, silently adding a full interval of dead time,
+    # and its sleeps can't be interrupted by stop_event.
+    confirm_buy_interval = t.get("confirm_buy_interval", DEFAULT_TIMINGS["confirm_buy_interval"])
+    pyautogui.press("\n")
+    _sleep(confirm_buy_interval)
+    pyautogui.press("\n")
     _sleep(t["post_buy_wait"])
 
     # Single grab shared by both template matches to avoid DXGI frame inconsistency.
@@ -432,7 +484,7 @@ def buy_sequence(t, full_region=None, stop_event=None, log=None):
     # Retry while undetermined — the success/fail screen can appear late.
     # All retries happen BEFORE the reset keystrokes so we don't navigate away
     # before the screen has had a chance to render.
-    retry_wait = t.get("buy_result_retry_wait", 0.8)
+    retry_wait = t.get("buy_result_retry_wait", DEFAULT_TIMINGS["buy_result_retry_wait"])
     for _ in range(3):
         if result is not None:
             break
@@ -450,7 +502,14 @@ def buy_sequence(t, full_region=None, stop_event=None, log=None):
         else:
             log("⚠️ Buy result undetermined")
 
-    pyautogui.typewrite(["\n", "esc"], interval=t["reset_interval"])
+    # Dismiss the buy-result screen (Enter closes the dialog, Esc backs out).
+    # Explicit press + wait instead of typewrite so the sleeps are
+    # stop_event-interruptible. The wait after esc stays: reset_search presses
+    # esc again right away, and back-to-back keys don't register in-game.
+    pyautogui.press("\n")
+    _sleep(t.get("enter_auction_interval", DEFAULT_TIMINGS["enter_auction_interval"]))
+    pyautogui.press("esc")
+    _sleep(t.get("exit_auction_interval", DEFAULT_TIMINGS["exit_auction_interval"]))
     reset_search(t, stop_event=stop_event, log=log)
     return result
 
@@ -472,12 +531,14 @@ def reset_search(t, stop_event=None, log=None):
     except Exception:
         return
     _sleep = stop_event.wait if stop_event is not None else time.sleep
+    # Esc backs out of the auction screen — the transition out takes longer
+    # than the Enters that re-open the search, so it has its own interval.
     pyautogui.press("esc")
-    _sleep(t["reset_interval"])
+    _sleep(t.get("exit_auction_interval", DEFAULT_TIMINGS["exit_auction_interval"]))
     pyautogui.press("\n")
-    _sleep(t["reset_interval"])
+    _sleep(t.get("enter_auction_interval", DEFAULT_TIMINGS["enter_auction_interval"]))
     pyautogui.press("\n")
-    _sleep(t.get("load_cars_interval", 0.8))
+    _sleep(t.get("load_cars_interval", DEFAULT_TIMINGS["load_cars_interval"]))
 
 
 # -------------------------
@@ -584,10 +645,19 @@ def sniper_loop(
         else:
             logger_callback("⚠️  docs/sold_badge_region.json missing — sold detection skipped")
 
+        # Buy behavior: last available row (default, less competition) or
+        # first available row (slightly faster attempt). Read once per run.
+        buy_last = bool(cfg.get("BUY_LAST_AVAILABLE", True))
+        target_desc = "last available" if buy_last else "first available"
+
         logger_callback("🚀 Sniper starting now!")
         successes = 0
         failures = 0
         buy_attempts = 0
+        # refreshes = completed scan cycles. Every scan path (no car, all
+        # sold, buy attempt) ends by refreshing the auction list, so this
+        # increments exactly once per scan — the overlay shows it as
+        # "Refreshed: N/total scans".
         refreshes = 0
 
         for i in range(scans):
@@ -608,7 +678,7 @@ def sniper_loop(
 
             try:
                 # One shared full-screen grab per scan — car_available() and
-                # find_last_available_row() both use this frame, so a bad DXGI
+                # find_available_row() both use this frame, so a bad DXGI
                 # capture fails consistently (button not found) rather than
                 # car_available seeing the button on one frame and row detection
                 # seeing a dark/empty frame from a second independent grab.
@@ -620,30 +690,37 @@ def sniper_loop(
                     row_regions = window_utils.get_row_regions(win_now) if win_now else []
 
                     if row_regions and badge_params:
-                        available = find_last_available_row(
+                        available, saw_any_car = find_available_row(
                             row_regions,
                             badge_params,
                             sold_template,
                             log=logger_callback,
                             full_img=shared_frame,
+                            buy_last=buy_last,
                         )
                     else:
                         available = 0  # no row data — attempt buy on current row
+                        saw_any_car = True
 
                     if available < 0:
                         refreshes += 1
-                        logger_callback(f"Scan #{i + 1} 🏷️  All visible rows sold — resetting")
+                        if saw_any_car:
+                            logger_callback(f"Scan #{i + 1} 🏷️  All visible rows sold — resetting")
+                        else:
+                            logger_callback(
+                                f"Scan #{i + 1} ⏳ Row 1 didn't render in time — resetting"
+                            )
                         reset_search(timings, stop_event=stop_event, log=logger_callback)
                     else:
                         buy_attempts += 1
                         logger_callback(
-                            f"Scan #{i + 1} ✅ Row {available + 1} (last available) — buying!"
+                            f"Scan #{i + 1} ✅ Row {available + 1} ({target_desc}) — buying!"
                             f" (Attempt #{buy_attempts})"
                         )
 
                         # Navigate from row 1 (default) down to the target row
                         if available > 0:
-                            nav_delay = timings.get("nav_interval", 0.3)
+                            nav_delay = timings.get("nav_interval", DEFAULT_TIMINGS["nav_interval"])
                             for _ in range(available):
                                 pyautogui.press("down")
                                 stop_event.wait(nav_delay)

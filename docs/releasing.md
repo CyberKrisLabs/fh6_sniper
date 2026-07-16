@@ -64,7 +64,7 @@ This overwrites `assets/sniper.ico`. Commit the new `.ico` before building.
 
 | File | Purpose |
 |---|---|
-| `FH6 Sniper.spec` | PyInstaller build spec (one-file exe, includes `assets/` and `docs/`) |
+| `FH6 Sniper.spec` | PyInstaller build spec (one-file exe, includes `assets/`; `docs/` is deliberately not bundled) |
 | `installer/installer.iss` | Inno Setup installer script |
 | `.github/workflows/release.yml` | CI/CD — builds and publishes on version tag push |
 | `tools/make_icon.py` | Generates `assets/sniper.ico` from code |

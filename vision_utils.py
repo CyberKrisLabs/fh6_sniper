@@ -24,8 +24,16 @@ import window_utils
 
 CONFIG_FILE = window_utils.get_config_file()
 
+# Sold-badge match threshold — the single authoritative value. sniper.py
+# re-exports it; calibrator and the tuning tools import it from here so it
+# can never silently drift between the runtime and the diagnostics.
+SOLD_THRESHOLD = 0.68
+
 # simple in-memory cache for loaded templates to avoid disk I/O
 _template_cache: dict[str, np.ndarray] = {}
+# grayscale variants cached separately so the BGR→GRAY conversion runs once
+# per template instead of once per detection call
+_template_gray_cache: dict[str, np.ndarray] = {}
 
 # dxcam camera instance — reused across calls (DXGI Desktop Duplication)
 _dxcam_instance = None
@@ -137,6 +145,13 @@ def grab_region(region: tuple[int, int, int, int]):
 # future searches when the window size is stable.
 _last_scale_hint: dict[str, float] = {}
 
+# consecutive hinted-search misses per template. A miss usually means the
+# button simply isn't on screen, so re-running the full scale range every
+# time is wasted work — we only widen the search occasionally to recover
+# from a stale hint (e.g. after a window resize).
+_hint_miss_counts: dict[str, int] = {}
+_FULL_RANGE_RETRY_EVERY = 10
+
 
 # thresholds for distinguishing window sizes relative to the screen.
 # if either dimension is below SMALL -> use small template
@@ -223,26 +238,6 @@ def choose_template(
     return chosen, category
 
 
-def save_manual_template_match(template_path, scale, confidence):
-    try:
-        with open(CONFIG_FILE) as f:
-            data = json.load(f)
-
-        data["MANUAL_TEMPLATE_INFO"] = {
-            "template_path": template_path,
-            "scale": scale,
-            "confidence": confidence,
-        }
-
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-
-        print("✅ Updated MANUAL_TEMPLATE_INFO in config.json")
-
-    except Exception as e:
-        print(f"⚠️ Failed writing config: {e}")
-
-
 def _load_template(image_path: str, debug: bool = False):
     """Load template as a numpy array (BGR) and cache the result.
 
@@ -269,6 +264,15 @@ def _load_template(image_path: str, debug: bool = False):
     return img
 
 
+def _load_template_gray(image_path: str, debug: bool = False):
+    """Load template as grayscale, cached (see _load_template)."""
+    if image_path not in _template_gray_cache:
+        _template_gray_cache[image_path] = cv2.cvtColor(
+            _load_template(image_path, debug=debug), cv2.COLOR_BGR2GRAY
+        )
+    return _template_gray_cache[image_path]
+
+
 def locate_on_screen_with_variants(
     base_path: str,
     region=None,
@@ -280,7 +284,6 @@ def locate_on_screen_with_variants(
     debug: bool = False,
     scale_hint: float | None = None,
     hint_margin: float = 0.10,
-    test: bool = False,
     screenshot=None,
 ) -> tuple[int, int, int, int] | None:
     """Attempt to locate a template and its size variants.
@@ -332,7 +335,6 @@ def locate_on_screen_with_variants(
             debug=debug,
             scale_hint=hint,
             hint_margin=hint_margin,
-            test=test,
             screenshot=screenshot,
         )
         if loc is not None:
@@ -351,7 +353,6 @@ def locate_on_screen_scaled(
     debug: bool = False,
     scale_hint: float | None = None,
     hint_margin: float = 0.10,
-    test: bool = False,
     screenshot=None,
 ) -> tuple[int, int, int, int] | None:
     """Search the screen or region for a template at multiple scales.
@@ -388,19 +389,14 @@ def locate_on_screen_scaled(
         print(f"⚠️  Error taking screenshot: {e}")
         return None
 
-    # convert screenshot to numpy BGR array
-    screen_img = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+    # convert screenshot directly to the colorspace we match in — one pass,
+    # not RGB→BGR→GRAY; templates come pre-converted from the cache
     if grayscale:
-        screen_proc = cv2.cvtColor(screen_img, cv2.COLOR_BGR2GRAY)
+        screen_proc = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2GRAY)
+        template_proc = _load_template_gray(image_path, debug=debug)
     else:
-        screen_proc = screen_img
-
-    template_color = _load_template(image_path, debug=debug)
-
-    if grayscale:
-        template_proc = cv2.cvtColor(template_color, cv2.COLOR_BGR2GRAY)
-    else:
-        template_proc = template_color
+        screen_proc = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+        template_proc = _load_template(image_path, debug=debug)
 
     screen_h, screen_w = screen_proc.shape[:2]
 
@@ -444,23 +440,23 @@ def locate_on_screen_scaled(
         if max_val >= confidence:
             # remember this scale for next time
             _last_scale_hint[image_path] = scale
+            _hint_miss_counts.pop(image_path, None)
             # match found - compute screen coords
-
-            if test:
-                save_manual_template_match(image_path, scale, confidence)
-
             match_left = left + max_loc[0]
             match_top = top + max_loc[1]
             # width/height should be size of resized template
 
             return (match_left, match_top, t_w, t_h)
 
-    # if we tried a hinted window and failed, fall back to full range once
+    # If we tried a hinted window and failed, occasionally fall back to the
+    # full scale range — on the first miss (the hint may be stale) and then
+    # every _FULL_RANGE_RETRY_EVERY misses, not every scan: routine misses
+    # just mean the button isn't on screen.
     if scale_hint is not None and scales_to_try is not None:
-        # check if the hint-limited search covered entire interval; if not,
-        # run once over the full range.
+        misses = _hint_miss_counts.get(image_path, 0) + 1
+        _hint_miss_counts[image_path] = misses
         full_range = np.linspace(scale_max, scale_min, scale_steps)
-        if not np.array_equal(full_range, scales_to_try):
+        if misses % _FULL_RANGE_RETRY_EVERY == 1 and not np.array_equal(full_range, scales_to_try):
             for scale in full_range:
                 t_h = int(template_proc.shape[0] * scale)
                 t_w = int(template_proc.shape[1] * scale)
@@ -476,6 +472,7 @@ def locate_on_screen_scaled(
                     print(f"scale={scale:.3f} max_val={max_val:.3f}")
                 if max_val >= confidence:
                     _last_scale_hint[image_path] = scale
+                    _hint_miss_counts.pop(image_path, None)
                     match_left = left + max_loc[0]
                     match_top = top + max_loc[1]
                     return (match_left, match_top, t_w, t_h)
@@ -532,62 +529,6 @@ def badge_scan_region(
     return (bx, by, bw, bh)
 
 
-def detect_sold(
-    row_region: tuple[int, int, int, int],
-    badge_params: dict,
-    template_path: str,
-    confidence: float = 0.73,
-) -> bool:
-    """Return True if the "Sold!" badge is detected in the row's badge sub-region.
-
-    Tries the _med variant as a fallback when it exists alongside
-    the base template — same pattern as the auction button templates.
-
-    Args:
-        row_region: (x, y, w, h) of the full row card in screen coords.
-        badge_params: dict loaded from docs/sold_badge_region.json with
-                      badge_x_pct, badge_y_pct, badge_w_pct, badge_h_pct keys.
-        template_path: absolute path to sold_badge_template.png.
-        confidence: template-match threshold (0–1).
-    """
-    bx, by, bw, bh = badge_scan_region(row_region, badge_params)
-    scan = (bx, by, bw, bh)
-
-    # Pick primary variant based on row width vs screen width (row ≈ 30 % of window)
-    rx, ry, rw, rh = row_region
-    screen_w = pyautogui.size()[0]
-    rw_pct = rw / screen_w if screen_w else 1.0
-    if rw_pct < MED_PERCENT_WIDTH * 0.30:
-        primary = template_path.replace(".png", "_med.png")
-    else:
-        primary = template_path
-
-    # Build candidate list: preferred size first, then full as fallback
-    candidates: list[str] = []
-    for p in [
-        primary,
-        template_path.replace(".png", "_med.png"),
-        template_path,
-        template_path.replace(".png", "_1024x768.png"),
-    ]:
-        if p not in candidates and os.path.isfile(p):
-            candidates.append(p)
-
-    for tpl in candidates:
-        loc = locate_on_screen_scaled(
-            tpl,
-            region=scan,
-            confidence=confidence,
-            grayscale=False,
-            scale_min=0.1,  # wider range → handles small windows even with one template
-            scale_max=1.2,
-            scale_steps=24,
-        )
-        if loc is not None:
-            return True
-    return False
-
-
 def _region_is_yellow(img_bgr: np.ndarray) -> bool:
     """Return True if the region contains any yellow pixels in the sold-badge hue range.
 
@@ -633,9 +574,22 @@ def _crop_to_yellow_badge(img_bgr: np.ndarray) -> np.ndarray:
     return img_bgr[y1:y2, x1:x2]
 
 
+# OcrEngine instance reused across calls — creating one per recognition
+# added measurable latency to every sold-badge check.
+_ocr_engine = None
+
+
+def _get_ocr_engine():
+    global _ocr_engine
+    if _ocr_engine is None:
+        from winrt.windows.media.ocr import OcrEngine
+
+        _ocr_engine = OcrEngine.try_create_from_user_profile_languages()
+    return _ocr_engine
+
+
 async def _winrt_ocr_async(img_bgr: np.ndarray) -> str:
     from winrt.windows.graphics.imaging import BitmapPixelFormat, SoftwareBitmap
-    from winrt.windows.media.ocr import OcrEngine
     from winrt.windows.storage.streams import DataWriter
 
     crop = _crop_to_yellow_badge(img_bgr)
@@ -643,7 +597,7 @@ async def _winrt_ocr_async(img_bgr: np.ndarray) -> str:
     h_out = crop.shape[0] * scale
     w_out = crop.shape[1] * scale
 
-    engine = OcrEngine.try_create_from_user_profile_languages()
+    engine = _get_ocr_engine()
     if engine is None:
         return ""
 
@@ -682,29 +636,15 @@ def _sold_badge_ocr(img_bgr: np.ndarray) -> bool:
     return "SOLD" in t or (t.startswith("SO") and len(t) >= 3)
 
 
-def sold_badge_score(
-    row_region: tuple[int, int, int, int],
-    badge_params: dict,
-    template_path: str,
-    row_img=None,
-) -> float:
-    """Return the best raw template-match confidence for the sold badge (0–1).
+def build_sold_candidates(template_path: str, row_w: int) -> list[str]:
+    """Build the ordered sold-badge template candidate list for a row width.
 
-    Same region and candidate logic as detect_sold() but returns the peak score
-    across all variants and scales without applying a threshold. Useful for
-    tuning the confidence value in test_detection.py.
-
-    Args:
-        row_img: optional pre-captured PIL Image of the full row. When provided
-                 the badge sub-region is cropped from it instead of taking a
-                 second screenshot — avoids frame-timing issues where a second
-                 grab_region call returns a different (stale) frame.
+    Reads config.json for the pixel-captured calibration template, so hot-loop
+    callers should call this once per scan cycle (not per row) and pass the
+    result to sold_badge_score(candidates=...).
     """
-    bx, by, bw, bh = badge_scan_region(row_region, badge_params)
-
-    rx, ry, rw, rh = row_region
     screen_w = pyautogui.size()[0]
-    rw_pct = rw / screen_w if screen_w else 1.0
+    rw_pct = row_w / screen_w if screen_w else 1.0
     if rw_pct < MED_PERCENT_WIDTH * 0.30:
         primary = template_path.replace(".png", "_med.png")
     else:
@@ -729,6 +669,37 @@ def sold_badge_score(
     ]:
         if p not in candidates and os.path.isfile(p):
             candidates.append(p)
+    return candidates
+
+
+def sold_badge_score(
+    row_region: tuple[int, int, int, int],
+    badge_params: dict,
+    template_path: str,
+    row_img=None,
+    candidates: list[str] | None = None,
+) -> float:
+    """Return the best raw template-match confidence for the sold badge (0–1).
+
+    Same region and candidate logic as detect_sold() but returns the peak score
+    across all variants and scales without applying a threshold. Useful for
+    tuning the confidence value in test_detection.py.
+
+    Args:
+        row_img: optional pre-captured PIL Image of the full row. When provided
+                 the badge sub-region is cropped from it instead of taking a
+                 second screenshot — avoids frame-timing issues where a second
+                 grab_region call returns a different (stale) frame.
+        candidates: optional pre-built template candidate list (see
+                 build_sold_candidates). Callers in a hot loop should build
+                 this once and pass it in — building it here costs a
+                 config.json disk read per call.
+    """
+    bx, by, bw, bh = badge_scan_region(row_region, badge_params)
+
+    rx, ry, rw, rh = row_region
+    if candidates is None:
+        candidates = build_sold_candidates(template_path, rw)
 
     try:
         if row_img is not None:
@@ -778,6 +749,11 @@ def sold_badge_score(
                 _, max_val, _, _ = cv2.minMaxLoc(result)
                 if max_val > best:
                     best = float(max_val)
+                    # Callers only compare against SOLD_THRESHOLD — once past
+                    # it, exhausting the remaining scales/variants for a
+                    # higher peak is wasted work.
+                    if best >= SOLD_THRESHOLD:
+                        return best
         except Exception:
             continue
     return best

@@ -62,8 +62,9 @@ def get_user_data_file(filename: str) -> str:
     When running from source: returns ``docs/<filename>`` so calibration data
     stays in the repo as before.
     When running as a compiled exe (PyInstaller): returns
-    ``%APPDATA%\\FH6Sniper\\<filename>`` and seeds the file from the bundled
-    ``docs/`` default the first time it is requested.
+    ``%APPDATA%\\FH6Sniper\\<filename>``. (No seeding from bundled defaults —
+    docs/ is deliberately not included in the PyInstaller bundle; these files
+    are created by calibration/tuning on first use.)
     """
     if not getattr(sys, "frozen", False):
         return os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", filename)
@@ -71,16 +72,7 @@ def get_user_data_file(filename: str) -> str:
     app_data = os.environ.get("APPDATA") or os.path.expanduser("~")
     data_dir = os.path.join(app_data, "FH6Sniper")
     os.makedirs(data_dir, exist_ok=True)
-    path = os.path.join(data_dir, filename)
-
-    if not os.path.isfile(path):
-        bundled = resource_path(os.path.join("docs", filename))
-        if os.path.isfile(bundled):
-            import shutil
-
-            shutil.copy2(bundled, path)
-
-    return path
+    return os.path.join(data_dir, filename)
 
 
 def get_config_file() -> str:
@@ -216,8 +208,6 @@ def get_fh6_region_safe(fallback_region=None):
 
     if window is None:
         print("WARNING: Forza Horizon 6 window not found. Using fallback region.")
-        if fallback_region:
-            fullscreen = False
         return fallback_region
 
     # Log fullscreen status for debugging
@@ -306,6 +296,23 @@ def best_matching_row_profile(
     return best
 
 
+# Tuned-rows JSON cached by mtime — get_row_regions runs on every scan with
+# a car present, and the file only changes when the user re-runs the tuner.
+_tuned_rows_cache: dict = {"mtime": None, "data": None}
+
+
+def _load_tuned_rows_cached(path: str) -> dict | None:
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    if _tuned_rows_cache["mtime"] != mtime:
+        with open(path) as f:
+            _tuned_rows_cache["data"] = json.load(f)
+        _tuned_rows_cache["mtime"] = mtime
+    return _tuned_rows_cache["data"]
+
+
 def get_tuned_row_regions(win, num_rows: int = 4) -> list[tuple[int, int, int, int]]:
     """Load per-row tuning from docs/row_regions_tuned.json and return screen coords.
 
@@ -319,8 +326,9 @@ def get_tuned_row_regions(win, num_rows: int = 4) -> list[tuple[int, int, int, i
     if not os.path.isfile(tuned_path):
         return []
     try:
-        with open(tuned_path) as f:
-            data = json.load(f)
+        data = _load_tuned_rows_cached(tuned_path)
+        if data is None:
+            return []
 
         dpr = _get_display_dpr()
 

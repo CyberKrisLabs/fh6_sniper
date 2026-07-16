@@ -22,30 +22,48 @@ import settings
 if TYPE_CHECKING:
     from ui.tabs.sniper import SniperTab
 
+# Preset values include the ~0.1s per keypress that PyAutoGUI's implicit
+# PAUSE used to add before it was disabled (sniper.py sets PAUSE = 0) —
+# the game needs that time to register inputs, so it now lives here
+# explicitly instead of as hidden, untunable latency.
 PRESETS = {
-    "Fast": {
-        "car_available_interval": 0.3,
-        "nav_interval": 0.2,
+    "Faster": {
+        # All values measured live as stable — the Enter presses register far
+        # faster than the Escape screen transition, hence exit >> enter.
+        "car_available_interval": 0.25,
+        "nav_interval": 0.25,
         "confirm_buy_interval": 0.25,
         "post_buy_wait": 4.0,
-        "reset_interval": 0.625,
-        "load_cars_interval": 0.7,
+        "exit_auction_interval": 0.7,
+        "enter_auction_interval": 0.25,
+        "load_cars_interval": 0.75,
     },
-    "Mid": {
-        "car_available_interval": 0.5,
+    "Fast": {
+        "car_available_interval": 0.4,
         "nav_interval": 0.3,
         "confirm_buy_interval": 0.35,
-        "post_buy_wait": 5.0,
-        "reset_interval": 0.8,
+        "post_buy_wait": 4.0,
+        "exit_auction_interval": 0.725,
+        "enter_auction_interval": 0.3,
         "load_cars_interval": 0.8,
     },
+    "Mid": {
+        "car_available_interval": 0.6,
+        "nav_interval": 0.4,
+        "confirm_buy_interval": 0.45,
+        "post_buy_wait": 5.0,
+        "exit_auction_interval": 0.9,
+        "enter_auction_interval": 0.4,
+        "load_cars_interval": 0.9,
+    },
     "Slow": {
-        "car_available_interval": 0.7,
-        "nav_interval": 0.6,
-        "confirm_buy_interval": 0.65,
+        "car_available_interval": 0.8,
+        "nav_interval": 0.7,
+        "confirm_buy_interval": 0.75,
         "post_buy_wait": 6.0,
-        "reset_interval": 1.1,
-        "load_cars_interval": 1.1,
+        "exit_auction_interval": 1.2,
+        "enter_auction_interval": 0.7,
+        "load_cars_interval": 1.2,
     },
 }
 
@@ -54,6 +72,8 @@ class SettingsTab(QWidget):
     def __init__(self, sniper_tab: SniperTab, parent=None):
         super().__init__(parent)
         self._sniper_tab = sniper_tab
+        # Back-reference so the overlay's own Hide button can untick our box
+        sniper_tab._settings_tab = self
         self._applying_preset = False
         self._build_ui()
         self._load_values()
@@ -124,18 +144,40 @@ class SettingsTab(QWidget):
         dlg.setIcon(QMessageBox.Icon.Information)
         dlg.exec()
 
-    def _show_reset_interval_info(self):
+    def _show_exit_auction_info(self):
         dlg = QMessageBox(self)
-        dlg.setWindowTitle("Reset Interval")
-        dlg.setText("<b>Reset Interval</b>")
+        dlg.setWindowTitle("Exit Auction Interval")
+        dlg.setText("<b>Exit Auction Interval</b>")
         dlg.setInformativeText(
-            "The delay (in seconds) after Escape and after the first Enter, when "
-            "the sniper backs out of the current screen and re-opens the auction "
-            "search: Escape → wait → Enter → wait → Enter.\n\n"
-            "See Load Cars Interval for the wait after that final Enter, while the "
-            "list actually loads.\n\n"
-            "Floored at 0.5s — testing shows the game won't reliably register these "
-            "key presses any faster than that, no matter how fast the PC is."
+            "The delay (in seconds) after pressing Escape to back out of the "
+            "auction screen, before the sniper starts re-opening the search: "
+            "Escape → THIS wait → Enter → Enter Auction wait → Enter.\n\n"
+            "Backing out of the auction screen takes longer than the Enter "
+            "presses that follow, so it has its own interval — this is usually "
+            "the one to raise if reset keystrokes are being dropped.\n\n"
+            "Also used after a buy attempt, for the wait after the Esc that "
+            "dismisses the buy-result screen.\n\n"
+            "Floored at 0.5s — testing shows the game won't reliably register "
+            "these key presses any faster than that, no matter how fast the PC is."
+        )
+        dlg.setIcon(QMessageBox.Icon.Information)
+        dlg.exec()
+
+    def _show_enter_auction_info(self):
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Enter Auction Interval")
+        dlg.setText("<b>Enter Auction Interval</b>")
+        dlg.setInformativeText(
+            "The delay (in seconds) after the first Enter that re-opens the "
+            "auction search: Escape → Exit Auction wait → Enter → THIS wait → "
+            "Enter.\n\n"
+            "Menu confirmations register faster than the Escape transition, so "
+            "this can be tuned much lower than Exit Auction Interval — live "
+            "testing found 0.25s stable, and a really fast PC may go lower "
+            "(minimum 0.1s).\n\n"
+            "See Load Cars Interval for the wait after the final Enter, while "
+            "the list actually loads.\n\n"
+            "If the second Enter stops registering, you've gone too low."
         )
         dlg.setIcon(QMessageBox.Icon.Information)
         dlg.exec()
@@ -147,14 +189,27 @@ class SettingsTab(QWidget):
         dlg.setInformativeText(
             "The delay (in seconds) after the final Enter of the reset sequence, "
             "while the auction list actually reloads before the next scan.\n\n"
-            "Defaults to the same value as Reset Interval, matching the original "
-            "combined timing before these were split into separate fields — this "
-            "is the safest starting point.\n\n"
             "If the sniper is scanning before the list has finished loading, raise "
             "this value. If your connection is fast and cars are being missed due "
             "to unnecessary waiting, you can try lowering it — just verify the "
             "auction list is still loading reliably before committing to a lower "
             "value."
+        )
+        dlg.setIcon(QMessageBox.Icon.Information)
+        dlg.exec()
+
+    def _show_buy_result_retry_info(self):
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Buy Result Retry")
+        dlg.setText("<b>Buy Result Retry</b>")
+        dlg.setInformativeText(
+            "After a buy attempt, the sniper screenshots the screen to check "
+            "whether the purchase succeeded or failed. If the result screen "
+            "hasn't rendered yet, it waits this long (in seconds) and re-checks, "
+            "up to 3 times.\n\n"
+            "Not part of the timing presets — it depends on how late FH6 renders "
+            "the result screen, not on scan speed.\n\n"
+            "If you see '⚠️ Buy result undetermined' in the log, raise this value."
         )
         dlg.setIcon(QMessageBox.Icon.Information)
         dlg.exec()
@@ -165,7 +220,8 @@ class SettingsTab(QWidget):
         dlg.setText("<b>Number of Scans</b>")
         dlg.setInformativeText(
             "How many times the sniper scans the auction listing before stopping. "
-            "Each scan checks all visible car rows and buys any that are available.\n\n"
+            "Each scan checks all visible car rows and buys at most one car — the "
+            "last available row, where there's less competition from other snipers.\n\n"
             "0 = Infinite: keeps scanning until you stop it manually or "
             "the Buyout Target is reached.\n\n"
             "Default is 1000, which is plenty for most sessions."
@@ -183,6 +239,42 @@ class SettingsTab(QWidget):
             "so if you only want 1 or 2 cars it won't keep buying.\n\n"
             "0 = Infinite: runs until you stop it manually or Number of Scans target is reached.\n"
             "Range: 0 (Infinite) – 100."
+        )
+        dlg.setIcon(QMessageBox.Icon.Information)
+        dlg.exec()
+
+    def _show_buy_last_info(self):
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Buy Last Available Row")
+        dlg.setText("<b>Buy Last Available Row</b>")
+        dlg.setInformativeText(
+            "Controls which available car the sniper buys when several rows "
+            "are available.\n\n"
+            "ON (default): buys the LAST available row. Most sniping bots "
+            "always target row 1, so the last row usually has the least "
+            "competition — you're probably not racing anyone for it.\n\n"
+            "OFF: buys the FIRST available row. The attempt is ever so "
+            "slightly faster (rows below the first available are never "
+            "checked, and there are fewer arrow-down presses to reach the "
+            "target), but you'll be competing against the inferior bots that "
+            "don't have row detection and always hammer the top row.\n\n"
+            "Takes effect the next time the sniper starts."
+        )
+        dlg.setIcon(QMessageBox.Icon.Information)
+        dlg.exec()
+
+    def _show_overlay_info(self):
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Show In-game Overlay")
+        dlg.setText("<b>Show In-game Overlay</b>")
+        dlg.setInformativeText(
+            "Shows a small always-on-top HUD over the FH6 window with live "
+            "stats (buy attempts, successes, failures, refreshes), start/stop "
+            "buttons, and calibration shortcuts — so you can control the "
+            "sniper without alt-tabbing.\n\n"
+            "The overlay only appears while the FH6 window is focused, and "
+            "hides automatically when you switch away.\n\n"
+            "The Hide button on the overlay itself also unticks this setting."
         )
         dlg.setIcon(QMessageBox.Icon.Information)
         dlg.exec()
@@ -228,11 +320,12 @@ class SettingsTab(QWidget):
         preset_box_layout = QHBoxLayout(preset_box)
         preset_box_layout.setContentsMargins(10, 8, 10, 8)
         self.preset_combo = QComboBox()
-        self.preset_combo.addItems(["Custom", "Fast", "Mid", "Slow"])
+        self.preset_combo.addItems(["Custom", "Faster", "Fast", "Mid", "Slow"])
         self.preset_combo.setFixedWidth(120)
         self.preset_combo.setToolTip(
             "Mid is recommended for most setups.\n"
             "Fast may miss cars on slower PCs or connections.\n"
+            "Faster is the most aggressive — high-end PC and very fast connection only.\n"
             "Slow is for high-latency setups."
         )
         self.preset_combo.currentTextChanged.connect(self._on_preset_change)
@@ -275,29 +368,47 @@ class SettingsTab(QWidget):
             "Wait time after a buy attempt for the game to respond.",
             self._show_post_buy_info,
         )
-        self.reset_interval_spin = self._make_float_row(
+        self.exit_auction_spin = self._make_float_row(
             timing_layout,
-            "Reset Interval (s)",
+            "Exit Auction (s)",
             0.5,
             20.0,
-            "Delay between keypresses during auction list reset. Can't go below 0.5s.",
-            self._show_reset_interval_info,
+            "Delay after Escape backs out of the auction screen. Can't go below 0.5s.",
+            self._show_exit_auction_info,
+        )
+        self.enter_auction_spin = self._make_float_row(
+            timing_layout,
+            "Enter Auction (s)",
+            0.1,
+            20.0,
+            "Delay after the first Enter that re-opens the auction search.",
+            self._show_enter_auction_info,
         )
         self.load_cars_spin = self._make_float_row(
             timing_layout,
             "Load Cars (s)",
             0.1,
             20.0,
-            "Delay after the first Enter of the reset sequence, before the final Enter.",
+            "Delay after the final Enter of the reset sequence, while the auction list reloads.",
             self._show_load_cars_info,
+        )
+        self.buy_result_retry_spin = self._make_float_row(
+            timing_layout,
+            "Buy Result Retry (s)",
+            0.1,
+            20.0,
+            "Wait between re-checks when the buy success/fail screen hasn't appeared yet.",
+            self._show_buy_result_retry_info,
         )
         for spin in (
             self.car_available_spin,
             self.nav_interval_spin,
             self.confirm_buy_spin,
             self.post_buy_spin,
-            self.reset_interval_spin,
+            self.exit_auction_spin,
+            self.enter_auction_spin,
             self.load_cars_spin,
+            self.buy_result_retry_spin,
         ):
             spin.valueChanged.connect(self._on_value_changed)
         left_col.addWidget(timing_box)
@@ -353,6 +464,23 @@ class SettingsTab(QWidget):
         bt_row.addWidget(bt_info_btn)
         bt_row.addStretch()
         scan_layout.addLayout(bt_row)
+        bl_row = QHBoxLayout()
+        self.buy_last_cb = QCheckBox("Buy last available row")
+        self.buy_last_cb.setChecked(True)
+        bl_info_btn = QPushButton("ⓘ")
+        bl_info_btn.setFixedSize(22, 22)
+        bl_info_btn.setFlat(True)
+        bl_info_btn.setStyleSheet(
+            "QPushButton { font-size: 13pt; color: #2196f3; border: none; padding: 0; }"
+            "QPushButton:hover { color: #64b5f6; }"
+        )
+        bl_info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        bl_info_btn.clicked.connect(self._show_buy_last_info)
+        bl_row.addWidget(self.buy_last_cb)
+        bl_row.addWidget(bl_info_btn)
+        bl_row.addStretch()
+        scan_layout.addLayout(bl_row)
+        self.buy_last_cb.toggled.connect(self._on_buy_last_toggled)
         self.scans_spin.valueChanged.connect(self._on_value_changed)
         self.buyout_target_spin.valueChanged.connect(self._on_value_changed)
         scan_layout.addStretch()
@@ -378,6 +506,28 @@ class SettingsTab(QWidget):
         bg_layout.addLayout(bg_row)
         self.moving_bg_off_cb.toggled.connect(self._on_moving_bg_toggled)
         right_col.addWidget(bg_box)
+
+        ui_box = QGroupBox("Interface")
+        ui_layout = QVBoxLayout(ui_box)
+        ui_layout.setSpacing(6)
+        ov_row = QHBoxLayout()
+        self.overlay_cb = QCheckBox("Show In-game Overlay")
+        self.overlay_cb.setChecked(False)
+        ov_info_btn = QPushButton("ⓘ")
+        ov_info_btn.setFixedSize(22, 22)
+        ov_info_btn.setFlat(True)
+        ov_info_btn.setStyleSheet(
+            "QPushButton { font-size: 13pt; color: #2196f3; border: none; padding: 0; }"
+            "QPushButton:hover { color: #64b5f6; }"
+        )
+        ov_info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        ov_info_btn.clicked.connect(self._show_overlay_info)
+        ov_row.addWidget(self.overlay_cb)
+        ov_row.addWidget(ov_info_btn)
+        ov_row.addStretch()
+        ui_layout.addLayout(ov_row)
+        self.overlay_cb.toggled.connect(self._on_overlay_toggled)
+        right_col.addWidget(ui_box)
         right_col.addStretch()
 
         columns_row.addLayout(left_col)
@@ -420,36 +570,6 @@ class SettingsTab(QWidget):
         parent_layout.addLayout(row)
         return spin
 
-    @staticmethod
-    def _make_int_row(parent_layout, label: str, mn: int, mx: int, tip: str):
-        row = QHBoxLayout()
-        lbl = QLabel(label)
-        lbl.setFixedWidth(160)
-        lbl.setToolTip(tip)
-        spin = QSpinBox()
-        spin.setRange(mn, mx)
-        spin.setFixedWidth(100)
-        row.addWidget(lbl)
-        row.addWidget(spin)
-        row.addStretch()
-        parent_layout.addLayout(row)
-        return spin
-
-    @staticmethod
-    def _make_combo_row(parent_layout, label: str, items: list[str], tip: str):
-        row = QHBoxLayout()
-        lbl = QLabel(label)
-        lbl.setFixedWidth(160)
-        lbl.setToolTip(tip)
-        combo = QComboBox()
-        combo.addItems(items)
-        combo.setFixedWidth(120)
-        row.addWidget(lbl)
-        row.addWidget(combo)
-        row.addStretch()
-        parent_layout.addLayout(row)
-        return combo
-
     def _load_values(self):
         self._applying_preset = True
         try:
@@ -457,13 +577,21 @@ class SettingsTab(QWidget):
             self.scans_spin.setValue(settings.get_scans())
             buyout_val = settings.get_buyout_target()
             self.buyout_target_spin.setValue(0 if buyout_val is None else buyout_val)
-            self.car_available_spin.setValue(timings.get("car_available_interval", 0.6))
-            self.nav_interval_spin.setValue(timings.get("nav_interval", 0.3))
-            self.confirm_buy_spin.setValue(timings.get("confirm_buy_interval", 0.35))
-            self.post_buy_spin.setValue(timings.get("post_buy_wait", 5.0))
-            self.reset_interval_spin.setValue(timings.get("reset_interval", 0.9))
-            self.load_cars_spin.setValue(timings.get("load_cars_interval", 0.9))
+            defaults = settings.DEFAULT_TIMINGS
+            for key, spin in (
+                ("car_available_interval", self.car_available_spin),
+                ("nav_interval", self.nav_interval_spin),
+                ("confirm_buy_interval", self.confirm_buy_spin),
+                ("post_buy_wait", self.post_buy_spin),
+                ("exit_auction_interval", self.exit_auction_spin),
+                ("enter_auction_interval", self.enter_auction_spin),
+                ("load_cars_interval", self.load_cars_spin),
+                ("buy_result_retry_wait", self.buy_result_retry_spin),
+            ):
+                spin.setValue(timings.get(key, defaults[key]))
             self.moving_bg_off_cb.setChecked(settings.get_moving_background_off())
+            self.buy_last_cb.setChecked(settings.get_buy_last_available())
+            self.overlay_cb.setChecked(settings.get_show_ingame_overlay())
         finally:
             self._applying_preset = False
         self._detect_preset()
@@ -476,13 +604,39 @@ class SettingsTab(QWidget):
         self.feedback_label.setStyleSheet("color: #4caf50;")
         QTimer.singleShot(2000, lambda: self.feedback_label.setText(""))
 
+    def _on_buy_last_toggled(self, checked: bool) -> None:
+        if self._applying_preset:
+            return
+        settings.set_buy_last_available(checked)
+        self.feedback_label.setText("Settings saved")
+        self.feedback_label.setStyleSheet("color: #4caf50;")
+        QTimer.singleShot(2000, lambda: self.feedback_label.setText(""))
+
+    def _on_overlay_toggled(self, checked: bool) -> None:
+        if self._applying_preset:
+            return
+        settings.set_show_ingame_overlay(checked)
+        self._sniper_tab.set_overlay_enabled(checked)
+        self.feedback_label.setText("Settings saved")
+        self.feedback_label.setStyleSheet("color: #4caf50;")
+        QTimer.singleShot(2000, lambda: self.feedback_label.setText(""))
+
+    def sync_overlay_checkbox(self, checked: bool) -> None:
+        """Reflect an overlay state change made elsewhere (e.g. its Hide button)."""
+        self._applying_preset = True
+        try:
+            self.overlay_cb.setChecked(checked)
+        finally:
+            self._applying_preset = False
+
     def _detect_preset(self):
         current = {
             "car_available_interval": self.car_available_spin.value(),
             "nav_interval": self.nav_interval_spin.value(),
             "confirm_buy_interval": self.confirm_buy_spin.value(),
             "post_buy_wait": self.post_buy_spin.value(),
-            "reset_interval": self.reset_interval_spin.value(),
+            "exit_auction_interval": self.exit_auction_spin.value(),
+            "enter_auction_interval": self.enter_auction_spin.value(),
             "load_cars_interval": self.load_cars_spin.value(),
         }
         for name, vals in PRESETS.items():
@@ -505,7 +659,8 @@ class SettingsTab(QWidget):
             self.nav_interval_spin.setValue(vals["nav_interval"])
             self.confirm_buy_spin.setValue(vals["confirm_buy_interval"])
             self.post_buy_spin.setValue(vals["post_buy_wait"])
-            self.reset_interval_spin.setValue(vals["reset_interval"])
+            self.exit_auction_spin.setValue(vals["exit_auction_interval"])
+            self.enter_auction_spin.setValue(vals["enter_auction_interval"])
             self.load_cars_spin.setValue(vals["load_cars_interval"])
         finally:
             self._applying_preset = False
@@ -522,8 +677,10 @@ class SettingsTab(QWidget):
             "nav_interval": self.nav_interval_spin.value(),
             "confirm_buy_interval": self.confirm_buy_spin.value(),
             "post_buy_wait": self.post_buy_spin.value(),
-            "reset_interval": self.reset_interval_spin.value(),
+            "exit_auction_interval": self.exit_auction_spin.value(),
+            "enter_auction_interval": self.enter_auction_spin.value(),
             "load_cars_interval": self.load_cars_spin.value(),
+            "buy_result_retry_wait": self.buy_result_retry_spin.value(),
         }
         raw = self.buyout_target_spin.value()
         buyout_target = None if raw == 0 else raw
@@ -539,8 +696,10 @@ class SettingsTab(QWidget):
             self.nav_interval_spin.setValue(corrected["timings"]["nav_interval"])
             self.confirm_buy_spin.setValue(corrected["timings"]["confirm_buy_interval"])
             self.post_buy_spin.setValue(corrected["timings"]["post_buy_wait"])
-            self.reset_interval_spin.setValue(corrected["timings"]["reset_interval"])
+            self.exit_auction_spin.setValue(corrected["timings"]["exit_auction_interval"])
+            self.enter_auction_spin.setValue(corrected["timings"]["enter_auction_interval"])
             self.load_cars_spin.setValue(corrected["timings"]["load_cars_interval"])
+            self.buy_result_retry_spin.setValue(corrected["timings"]["buy_result_retry_wait"])
         finally:
             self._applying_preset = False
         self._sniper_tab.scans_label.setText(f"Scans left: {corrected['scans']}")

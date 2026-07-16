@@ -1,10 +1,10 @@
 """Configuration management for FH6 Sniper.
 
 Functions:
+- load_config() / save_config(): Full config round-trip with validation
 - load_timings(): Get timing settings from config
-- save_timings(): Validate and save timing settings
-- get_scans(): Get number of scans to perform
-- reset_to_defaults(): Reset all settings to defaults
+- save_timings_ui(): Validate and save timings, scans, and buyout target from the UI
+- get_scans() / get_buyout_target(): Scan-loop limits
 """
 
 import json
@@ -19,19 +19,39 @@ MAX_INTERVAL = 20.0  # maximum interval to prevent unbearably slow execution
 MIN_SCANS = 0  # 0 means infinite
 MAX_SCANS = 1000000
 
-# reset_interval needs a higher floor than MIN_INTERVAL — below this, the game
-# won't reliably register the keystroke, regardless of how fast the PC is.
+# exit_auction_interval needs a higher floor than MIN_INTERVAL — the Escape
+# screen transition won't reliably register keys any faster, regardless of PC.
+# enter_auction_interval deliberately has NO extra floor (just MIN_INTERVAL):
+# live testing found the Enter presses stable down to ~0.25s, and a really
+# fast PC may go lower still.
 MIN_INTERVAL_OVERRIDES: dict[str, float] = {
-    "reset_interval": 0.5,
+    "exit_auction_interval": 0.5,
 }
 
+# The single authoritative defaults — sniper.py and the UI import these.
+# Values match the "Mid" preset and include the ~0.1s per keypress that
+# PyAutoGUI's implicit PAUSE used to add before it was disabled.
 DEFAULT_TIMINGS: dict[str, float] = {
+    # pause after pressing "y" while the buy dialog renders
     "car_available_interval": 0.6,
-    "nav_interval": 0.3,
-    "confirm_buy_interval": 0.35,
+    # delay between up/down key presses only (row navigation, buy dialog
+    # down-arrow) — can be faster since nothing needs to load
+    "nav_interval": 0.4,
+    # pause between the two Enter presses that confirm the purchase
+    "confirm_buy_interval": 0.45,
+    # wait after the buy sequence before checking the result screen
     "post_buy_wait": 5.0,
-    "reset_interval": 0.9,
+    # pause after Escape backs out of the auction screen — the screen
+    # transition out takes longer than the Enter presses that follow
+    # (esc -> exit wait -> enter -> enter wait -> enter)
+    "exit_auction_interval": 0.9,
+    # pause after the first Enter that re-opens the auction search — menu
+    # confirms register much faster than the Escape transition
+    "enter_auction_interval": 0.4,
+    # pause after the final Enter of the reset sequence, while the list loads
     "load_cars_interval": 0.9,
+    # wait between re-checks when the buy result screen hasn't rendered yet
+    "buy_result_retry_wait": 0.8,
 }
 
 # All default values
@@ -47,6 +67,11 @@ DEFAULT_CONFIG: dict[str, object] = {
     # the Auction Options button gets a plain white background instead of the
     # default animated one, so a different template set is needed
     "MOVING_BACKGROUND_OFF": False,
+    # whether to buy the LAST available row (less competition — most bots
+    # target row 1) or the FIRST available row (slightly faster attempt)
+    "BUY_LAST_AVAILABLE": True,
+    # whether the in-game HUD overlay is shown over the FH6 window
+    "SHOW_INGAME_OVERLAY": False,
     # AUCTION_OPTIONS_REGION is optional (only set via manual calibration)
 }
 
@@ -89,8 +114,10 @@ def validate_settings(timings_dict, scans_value, buyout_target=None):
         "nav_interval": "Nav Interval",
         "confirm_buy_interval": "Confirm Buy Interval",
         "post_buy_wait": "Post Buy Wait",
-        "reset_interval": "Reset Interval",
+        "exit_auction_interval": "Exit Auction Interval",
+        "enter_auction_interval": "Enter Auction Interval",
         "load_cars_interval": "Load Cars Interval",
+        "buy_result_retry_wait": "Buy Result Retry Wait",
     }
 
     for key, display_name in interval_names.items():
@@ -127,6 +154,10 @@ def load_config():
             # migrate old buy_attempt_interval (renamed to car_available_interval)
             if "buy_attempt_interval" in old_timings:
                 user_times.setdefault("car_available_interval", old_timings["buy_attempt_interval"])
+            # migrate old reset_interval (split into exit/enter auction intervals)
+            if "reset_interval" in old_timings:
+                user_times.setdefault("exit_auction_interval", old_timings["reset_interval"])
+                user_times.setdefault("enter_auction_interval", old_timings["reset_interval"])
             config["TIMINGS"] = {**DEFAULT_TIMINGS, **user_times}
             # if there were deprecated keys in the original user_config, clean them from file
             deprecated = [k for k in old_timings if k not in DEFAULT_TIMINGS]
@@ -152,14 +183,7 @@ def load_config():
         # Validate and fix timing intervals
         if "TIMINGS" in config:
             needs_save = False
-            for key in [
-                "car_available_interval",
-                "nav_interval",
-                "confirm_buy_interval",
-                "post_buy_wait",
-                "reset_interval",
-                "load_cars_interval",
-            ]:
+            for key in DEFAULT_TIMINGS:
                 min_val = MIN_INTERVAL_OVERRIDES.get(key, MIN_INTERVAL)
                 val = config["TIMINGS"].get(key, 0)
                 if val < min_val:
@@ -186,11 +210,6 @@ def load_timings():
     """Load timings for runtime use (sniper)."""
     config = load_config()
     return config["TIMINGS"]
-
-
-def load_timings_ui():
-    """Load timings for UI fields."""
-    return load_timings()
 
 
 def save_timings_ui(timings_dict, scans_value, buyout_target):
@@ -246,6 +265,32 @@ def set_skip_recalibration_reminder(value: bool):
     """Persist the user's choice about the recalibration reminder."""
     config = load_config()
     config["SKIP_RECALIBRATION_REMINDER"] = bool(value)
+    save_config(config)
+
+
+def get_buy_last_available():
+    """Return True if the sniper should buy the last available row (default)."""
+    config = load_config()
+    return config.get("BUY_LAST_AVAILABLE", True)
+
+
+def set_buy_last_available(value: bool):
+    """Persist whether the sniper targets the last or first available row."""
+    config = load_config()
+    config["BUY_LAST_AVAILABLE"] = bool(value)
+    save_config(config)
+
+
+def get_show_ingame_overlay():
+    """Return True if the in-game overlay should be shown (default off)."""
+    config = load_config()
+    return config.get("SHOW_INGAME_OVERLAY", False)
+
+
+def set_show_ingame_overlay(value: bool):
+    """Persist whether the in-game overlay is shown over the FH6 window."""
+    config = load_config()
+    config["SHOW_INGAME_OVERLAY"] = bool(value)
     save_config(config)
 
 

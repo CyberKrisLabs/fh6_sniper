@@ -27,15 +27,18 @@ import pyautogui
 
 # Make sure project root is on the path when run from any directory.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import sniper
 import vision_utils
 import window_utils
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-CONFIDENCE = 0.72  # same default used in buy_sequence for full-size windows
-SCALE_MIN = 0.35
+# Mirror the live detector's parameters (sniper._detect_buy_result) so the
+# diagnostic reports FOUND exactly when the sniper would.
+CONFIDENCE = sniper.BUY_RESULT_CONF
+SCALE_MIN = sniper._BUY_RESULT_SCALE_MIN
 SCALE_MAX = 1.0
-SCALE_STEPS = 30  # more steps for thorough diagnosis
+SCALE_STEPS = 30  # more steps than the live detector for thorough diagnosis
 COUNTDOWN = 5
 
 OUTPUT_DIR = os.path.join(ROOT, "docs")
@@ -153,32 +156,27 @@ def main():
         full_region = window_utils.get_window_region(win)
         rx, ry, rw, rh = full_region
         print(f"  FH6 window region: x={rx} y={ry} w={rw} h={rh}")
-        # Crop screen to the FH6 window region for matching (same as sniper)
-        screen_bgr = screen_bgr[ry : ry + rh, rx : rx + rw]
-        print(f"  Cropped to window: {screen_bgr.shape[1]}x{screen_bgr.shape[0]} px")
     else:
         print("  ⚠️  FH6 window not found — analysing full screen")
         full_region = None
+        rx, ry = 0, 0
+        rw, rh = screen_pil.width, screen_pil.height
 
-    # Determine which template size category applies (same as choose_template)
+    # Crop to the center ⅔ of the window — the exact region the live
+    # detector matches against (sniper._detect_buy_result).
+    cx, cy = rx + rw // 2, ry + rh // 2
+    sw2, sh2 = rw * 2 // 3, rh * 2 // 3
+    x1, y1 = cx - sw2 // 2, cy - sh2 // 2
+    screen_bgr = screen_bgr[y1 : y1 + sh2, x1 : x1 + sw2]
+    print(f"  Cropped to center 2/3 of window: {screen_bgr.shape[1]}x{screen_bgr.shape[0]} px")
+
     base_succ = window_utils.resource_path("assets/buyout_successful_template.png")
     base_fail = window_utils.resource_path("assets/buyout_failed_template.png")
 
-    _, cat = vision_utils.choose_template(base_succ, region=full_region, debug=False)
-    print(f"\n  Template category chosen by size heuristic: '{cat}'")
-
-    # Adjust thresholds to match buy_sequence logic
-    if cat == "small":
-        conf = 0.65
-        scale_min = 0.7
-    elif cat == "medium":
-        conf = 0.70
-        scale_min = 0.5
-    else:
-        conf = 0.72
-        scale_min = 0.35
-
-    print(f"  Matching params: confidence={conf}  scale_min={scale_min}  scale_max={SCALE_MAX}")
+    print(
+        f"  Matching params (same as live sniper): confidence={CONFIDENCE}  "
+        f"scale_min={SCALE_MIN}  scale_max={SCALE_MAX}"
+    )
 
     succ_templates = [
         base_succ,
@@ -190,20 +188,31 @@ def main():
     ]
 
     found_succ, annotated = analyse(
-        screen_bgr, "SUCCESS templates", succ_templates, conf, scale_min, SCALE_MAX, SCALE_STEPS
+        screen_bgr,
+        "SUCCESS templates",
+        succ_templates,
+        CONFIDENCE,
+        SCALE_MIN,
+        SCALE_MAX,
+        SCALE_STEPS,
     )
     found_fail, annotated = analyse(
-        annotated, "FAIL templates", fail_templates, conf, scale_min, SCALE_MAX, SCALE_STEPS
+        annotated, "FAIL templates", fail_templates, CONFIDENCE, SCALE_MIN, SCALE_MAX, SCALE_STEPS
     )
 
+    # Authoritative verdict: run the sniper's actual detector on the capture.
+    result = sniper._detect_buy_result(screen_pil, full_region)
+
     print(f"\n{'=' * 60}")
-    if found_succ:
-        verdict = "✅ WOULD REPORT: Buy successful"
-    elif found_fail:
-        verdict = "❌ WOULD REPORT: Buy failed"
+    if result is True:
+        verdict = "✅ SNIPER REPORTS: Buy successful"
+    elif result is False:
+        verdict = "❌ SNIPER REPORTS: Buy failed"
     else:
-        verdict = "⚠️  WOULD REPORT: Undetermined (neither template matched)"
-    print(f"  VERDICT: {verdict}")
+        verdict = "⚠️  SNIPER REPORTS: Undetermined (neither template matched)"
+    print(f"  VERDICT (from sniper._detect_buy_result): {verdict}")
+    if found_succ or found_fail:
+        print("  (per-template sweep above shows which variants/scales scored highest)")
     print(f"{'=' * 60}\n")
 
     # Save the raw capture and the annotated version

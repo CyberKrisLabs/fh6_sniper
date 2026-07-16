@@ -482,9 +482,11 @@ def _find_badge_via_template(row_regions, full_img, search_x_fraction, _status) 
         marker = " ← SELECTED" if tname == best_template_name else ""
         _status(f"   {tname}: {score:.3f}{marker}")
 
-    # Matches the runtime sniping threshold (sniper.SOLD_THRESHOLD) — calibration
-    # shouldn't lock in a badge position on a weaker match than scanning requires.
-    MIN_DETECTION_SCORE = 0.68
+    # The runtime sniping threshold — calibration shouldn't lock in a badge
+    # position on a weaker match than scanning requires.
+    import vision_utils
+
+    MIN_DETECTION_SCORE = vision_utils.SOLD_THRESHOLD
     if best_info is None or best_score < MIN_DETECTION_SCORE:
         _status(
             f"❌ Template matching: no sold badge found "
@@ -607,31 +609,6 @@ def load_sold_badge_template() -> str | None:
         return data.get("AUTO_SOLD_BADGE_TEMPLATE")
     except Exception:
         return None
-
-
-def load_captured_badge_template() -> str | None:
-    """Return the pixel-captured badge template path if it exists, else None."""
-    try:
-        with open(CONFIG_FILE) as f:
-            data = json.load(f)
-        path = data.get("CAPTURED_SOLD_BADGE_TEMPLATE")
-        if path and os.path.isfile(path):
-            return path
-    except Exception:
-        pass
-    return None
-
-
-def reset_sold_badge_auto_cal() -> None:
-    """Remove AUTO_SOLD_BADGE_TEMPLATE from config."""
-    try:
-        with open(CONFIG_FILE) as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        data = {}
-    data.pop("AUTO_SOLD_BADGE_TEMPLATE", None)
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(data, f, indent=2)
 
 
 def auto_calibrate(status_label=None):
