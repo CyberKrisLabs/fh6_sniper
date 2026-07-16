@@ -321,6 +321,10 @@ class GuidesTab(QWidget):
             "• Forza Horizon 6 installed and running\n"
             '• The game must be set to English — the sniper reads the "Sold!" badge text '
             "using OCR, other languages will not be detected\n"
+            "• Disconnect controllers and wheels — FH6 switches its button prompts to "
+            "gamepad glyphs the moment a controller sends any input (a nudged stick, "
+            "wheel drift, a bumped pedal). The sniper's templates match the keyboard-style "
+            '"(Y) Auction Options" button, so a glyph switch mid-session breaks detection\n'
             "• Windowed or borderless windowed mode is recommended for calibration"
         )
 
@@ -438,6 +442,9 @@ class GuidesTab(QWidget):
             "• Only one calibration type (Auto or Manual) can be active at a time. "
             "Remove the current one before switching.\n"
             "• If the sniper stops detecting after a game update, re-run Auto Calibration.\n"
+            "• If detection suddenly stops mid-session, a controller or wheel input may "
+            "have switched FH6's button prompts to gamepad glyphs — press any keyboard "
+            "key to switch back, and disconnect the controller.\n"
             "• If Auto Calibration can't find the Auction Options button but it's clearly "
             "visible, check whether you've disabled Moving Backgrounds in FH6 — tick "
             "Moving Background OFF in Settings and re-run calibration.\n"

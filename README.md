@@ -10,6 +10,8 @@ Automated auction house sniper for Forza Horizon 6. Continuously scans for avail
 
 > **The game must be set to English language.** The sniper reads the "Sold!" badge text using OCR — other languages will not be detected correctly.
 
+> **Keyboard prompts only — disconnect controllers and wheels.** FH6 switches its button prompts to gamepad glyphs the moment a controller or wheel sends any input (a nudged stick, wheel drift, a bumped pedal). The sniper's templates match the keyboard-style "(Y) Auction Options" button, so a prompt-glyph switch mid-session breaks detection until keyboard input flips it back. Safest is to disconnect any controller/wheel while sniping.
+
 ```bash
 pip install -r requirements.txt
 python app.py
@@ -122,6 +124,7 @@ Vision tests monkeypatch `pyautogui.screenshot` to simulate the screen, so FH6 d
 | Problem | Fix |
 |---|---|
 | Button not detected | Run Auto Calibration, or try Manual if the window is at an unusual size |
+| Detection suddenly stopped working | A controller/wheel input likely switched FH6's prompts to gamepad glyphs — press any keyboard key to switch back, and disconnect the controller |
 | Scans feel slow | Calibrate to a tighter region around the button |
 | Keystrokes not landing | Make sure FH6 is the foreground window when you start |
 | Auto calibration fails | Make sure the Auction House is open and visible, then retry |
