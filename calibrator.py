@@ -602,11 +602,15 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
 
 
 def load_sold_badge_template() -> str | None:
-    """Return the auto-calibrated sold badge template path, or None if not set."""
+    """Return the auto-calibrated sold badge template path, or None if not set.
+
+    The stored value is a filename (or a possibly-stale absolute path from an
+    older config) — resolved against the current bundle's assets.
+    """
     try:
         with open(CONFIG_FILE) as f:
             data = json.load(f)
-        return data.get("AUTO_SOLD_BADGE_TEMPLATE")
+        return window_utils.resolve_template_path(data.get("AUTO_SOLD_BADGE_TEMPLATE"))
     except Exception:
         return None
 
@@ -694,11 +698,15 @@ def auto_calibrate(status_label=None):
         # Select the best sold badge template for the current window size
         sold_tpl = select_sold_badge_template()
 
+        # Store template FILENAMES, not absolute paths: in the one-file exe,
+        # absolute asset paths point into the _MEIxxxxxx extraction dir, which
+        # is deleted on exit and renamed every launch. Readers resolve the
+        # filename against the current bundle via resolve_template_path().
         cfg_update = {
             "AUTO_AUCTION_OPTIONS_REGION": region,
-            "AUTO_AUCTION_OPTIONS_TEMPLATE": template_path,
+            "AUTO_AUCTION_OPTIONS_TEMPLATE": os.path.basename(template_path),
             "AUTO_AUCTION_OPTIONS_SCALE": scale,
-            "AUTO_SOLD_BADGE_TEMPLATE": sold_tpl,
+            "AUTO_SOLD_BADGE_TEMPLATE": os.path.basename(sold_tpl) if sold_tpl else sold_tpl,
         }
         try:
             with open(CONFIG_FILE) as f:
@@ -763,7 +771,9 @@ def load_auto_template_info():
         with open(CONFIG_FILE) as f:
             data = json.load(f)
         # Try new keys first, then fall back to old keys for backward compatibility
-        template_path = data.get("AUTO_AUCTION_OPTIONS_TEMPLATE") or data.get("AUTO_TEMPLATE_PATH")
+        template_path = window_utils.resolve_template_path(
+            data.get("AUTO_AUCTION_OPTIONS_TEMPLATE") or data.get("AUTO_TEMPLATE_PATH")
+        )
         scale = data.get("AUTO_AUCTION_OPTIONS_SCALE") or data.get("AUTO_SCALE")
         if template_path and scale is not None:
             return template_path, scale

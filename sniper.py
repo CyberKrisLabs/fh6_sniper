@@ -125,9 +125,12 @@ def car_available(region, full_img=None):
             else None
         )
         # Auto-calibrated template path + scale, read from the same cached
-        # config (old keys kept for backward compatibility). Previously this
-        # was a second config.json disk read on every scan.
-        auto_tpl_path = cfg.get("AUTO_AUCTION_OPTIONS_TEMPLATE") or cfg.get("AUTO_TEMPLATE_PATH")
+        # config (old keys kept for backward compatibility). The stored value
+        # is a filename (or a possibly-stale absolute path from an older
+        # config) — resolve it against the current bundle.
+        auto_tpl_path = window_utils.resolve_template_path(
+            cfg.get("AUTO_AUCTION_OPTIONS_TEMPLATE") or cfg.get("AUTO_TEMPLATE_PATH")
+        )
         auto_tpl_scale = cfg.get("AUTO_AUCTION_OPTIONS_SCALE") or cfg.get("AUTO_SCALE")
         auto_template_info = (
             (auto_tpl_path, auto_tpl_scale)

@@ -657,6 +657,10 @@ def build_sold_candidates(template_path: str, row_w: int) -> list[str]:
         with open(CONFIG_FILE) as _f:
             _cfg = json.load(_f)
         _captured = _cfg.get("CAPTURED_SOLD_BADGE_TEMPLATE")
+        if _captured and not os.path.isfile(_captured):
+            # Path from the other run mode (dev docs/ vs exe APPDATA) — try
+            # this mode's user-data location for the same filename.
+            _captured = window_utils.get_user_data_file(os.path.basename(_captured))
         if _captured and os.path.isfile(_captured):
             candidates.append(_captured)
     except Exception:

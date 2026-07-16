@@ -56,6 +56,26 @@ def resource_path(relative_path: str) -> str:
     return os.path.join(base, relative_path)
 
 
+def resolve_template_path(path: str | None) -> str | None:
+    """Resolve a template path stored in config.json to an existing file.
+
+    Config may hold a bare filename (current format) or an absolute path from
+    a previous run. Absolute paths go stale when they point into a PyInstaller
+    one-file extraction dir (%LOCALAPPDATA%\\FH6Sniper\\_MEIxxxxxx) — that
+    folder is deleted on exit and renamed every launch — or into a source tree
+    when switching between dev and exe runs. In all cases, fall back to the
+    bundled asset with the same filename.
+
+    Returns an absolute path to an existing file, or None.
+    """
+    if not path:
+        return None
+    if os.path.isfile(path):
+        return path
+    bundled = resource_path(os.path.join("assets", os.path.basename(path)))
+    return bundled if os.path.isfile(bundled) else None
+
+
 def get_user_data_file(filename: str) -> str:
     """Return a user-writable path for a runtime data file.
 
