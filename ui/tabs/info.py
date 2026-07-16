@@ -18,10 +18,10 @@ try:
 
     HAVE_REQUESTS = True
 except Exception:
-    requests = None
+    requests = None  # type: ignore[assignment]
     HAVE_REQUESTS = False
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 
 class InfoTab(QWidget):
