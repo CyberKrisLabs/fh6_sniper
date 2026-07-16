@@ -324,8 +324,7 @@ class GuidesTab(QWidget):
             "• Disconnect controllers and wheels — FH6 switches its button prompts to "
             "gamepad glyphs the moment a controller sends any input (a nudged stick, "
             "wheel drift, a bumped pedal). The sniper's templates match the keyboard-style "
-            '"(Y) Auction Options" button, so a glyph switch mid-session breaks detection\n'
-            "• Windowed or borderless windowed mode is recommended for calibration"
+            '"(Y) Auction Options" button, so a glyph switch mid-session breaks detection'
         )
 
         _section("Quick Start")
@@ -367,7 +366,7 @@ class GuidesTab(QWidget):
             '  2. Wait until at least one row shows a car with the yellow "Sold!" badge.\n'
             "  3. Click Run Auto Calibration.\n\n"
             "If it fails, make sure the game is fully visible (not covered by other windows) "
-            "and retry. Windowed mode works best."
+            "and retry."
         )
 
         _subhead("Manual Calibration")
