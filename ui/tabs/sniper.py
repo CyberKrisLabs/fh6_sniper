@@ -36,6 +36,9 @@ class SniperTab(QWidget):
     stats_updated = Signal(int, int, int, int, int)
     _sniper_done = Signal()
     _calib_mode_signal = Signal(bool)
+    # Emitted by overlay calibration workers (non-GUI threads) so the
+    # Calibration tab's SET / Not set labels refresh on the GUI thread.
+    _calib_refresh_signal = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -62,6 +65,7 @@ class SniperTab(QWidget):
         self.stats_updated.connect(self._apply_stats)
         self._sniper_done.connect(self._on_sniper_done)
         self._calib_mode_signal.connect(self._set_calibration_mode)
+        self._calib_refresh_signal.connect(self._refresh_calib_tab_status)
         _log_bridge.message.connect(self._append_log)
 
         self._build_ui()
@@ -240,7 +244,8 @@ class SniperTab(QWidget):
             except Exception as e:
                 _emit_log(f"❌ Auto calibration error (overlay): {e}")
             finally:
-                self._set_calibration_mode(True)
+                self._calib_mode_signal.emit(True)
+                self._calib_refresh_signal.emit()
 
         threading.Thread(target=_work, daemon=True).start()
 
@@ -295,6 +300,7 @@ class SniperTab(QWidget):
                 _emit_log("❌ Auction button calibration failed")
 
             self._calib_mode_signal.emit(True)
+            self._calib_refresh_signal.emit()
 
         threading.Thread(target=_work, daemon=True).start()
 
@@ -318,6 +324,7 @@ class SniperTab(QWidget):
             finally:
                 cal_overlay.destroy_later()
                 self._calib_mode_signal.emit(True)
+                self._calib_refresh_signal.emit()
 
         threading.Thread(target=_work, daemon=True).start()
 
@@ -332,6 +339,10 @@ class SniperTab(QWidget):
 
     def mark_calibration_done(self):
         self._calib_done_this_session = True
+
+    def _refresh_calib_tab_status(self) -> None:
+        if self._calib_tab is not None:
+            self._calib_tab._refresh_status()
 
     def _start(self):
         if self._sniper_running:

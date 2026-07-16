@@ -34,7 +34,7 @@ PRESETS = {
         "nav_interval": 0.25,
         "confirm_buy_interval": 0.25,
         "post_buy_wait": 4.0,
-        "exit_auction_interval": 0.7,
+        "exit_auction_interval": 0.65,
         "enter_auction_interval": 0.25,
         "load_cars_interval": 0.75,
     },

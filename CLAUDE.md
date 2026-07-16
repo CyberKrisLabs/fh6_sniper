@@ -147,6 +147,10 @@ the scan loop or buy sequence:
   via `stop_event.wait(...)` with configurable intervals. Never rely on implicit
   pauses, and never use `pyautogui.typewrite(interval=...)` (it sleeps after the
   last key and can't be interrupted by stop_event).
+- All game key presses go through `sniper.press_key()` (keyDown → ~20-40ms hold →
+  keyUp), never bare `pyautogui.press()`. The game samples input once per rendered
+  frame, so an instant down+up shorter than a frame can be dropped entirely — the
+  hold makes every press span at least one input sample.
 - Nothing in the per-scan or per-row path may read a file or enumerate windows
   unnecessarily — config.json and row-tuning JSON are mtime-cached, templates are
   cached in vision_utils, candidate lists are hoisted out of loops. Keep it that way.

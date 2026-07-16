@@ -9,6 +9,7 @@ Functions:
 
 import json
 import os
+import random
 import time
 
 import pyautogui
@@ -27,6 +28,23 @@ pyautogui.FAILSAFE = False
 # call. All our inter-key timing is explicit via stop_event.wait/config
 # intervals, so the implicit pause only adds hidden, untunable latency.
 pyautogui.PAUSE = 0
+
+# The game samples keyboard input once per rendered frame. pyautogui.press()
+# releases the key almost instantly after pressing it — shorter than a frame
+# at low fps — so the game can miss the press entirely. Holding each key for
+# a couple of frame-times makes every press reliably span at least one input
+# sample. Slightly randomized so presses don't land with machine-perfect
+# regularity.
+KEY_HOLD_MIN_S = 0.02
+KEY_HOLD_MAX_S = 0.04
+
+
+def press_key(key: str) -> None:
+    """Press a key with a short held duration instead of an instant tap."""
+    pyautogui.keyDown(key)
+    time.sleep(random.uniform(KEY_HOLD_MIN_S, KEY_HOLD_MAX_S))
+    pyautogui.keyUp(key)
+
 
 # Re-exported from vision_utils (its authoritative home) for existing
 # importers (ui.tabs.calibration, tools).
@@ -458,23 +476,23 @@ def buy_sequence(t, full_region=None, stop_event=None, log=None):
 
     _sleep = stop_event.wait if stop_event is not None else time.sleep
 
-    pyautogui.press("y")
+    press_key("y")
     car_available_interval = t.get(
         "car_available_interval", DEFAULT_TIMINGS["car_available_interval"]
     )
     _sleep(car_available_interval)
 
     nav_interval = t.get("nav_interval", DEFAULT_TIMINGS["nav_interval"])
-    pyautogui.press("down")
+    press_key("down")
     _sleep(nav_interval)
 
     # Explicit press + wait instead of typewrite(interval=...): typewrite also
     # sleeps after the LAST key, silently adding a full interval of dead time,
     # and its sleeps can't be interrupted by stop_event.
     confirm_buy_interval = t.get("confirm_buy_interval", DEFAULT_TIMINGS["confirm_buy_interval"])
-    pyautogui.press("\n")
+    press_key("\n")
     _sleep(confirm_buy_interval)
-    pyautogui.press("\n")
+    press_key("\n")
     _sleep(t["post_buy_wait"])
 
     # Single grab shared by both template matches to avoid DXGI frame inconsistency.
@@ -509,9 +527,9 @@ def buy_sequence(t, full_region=None, stop_event=None, log=None):
     # Explicit press + wait instead of typewrite so the sleeps are
     # stop_event-interruptible. The wait after esc stays: reset_search presses
     # esc again right away, and back-to-back keys don't register in-game.
-    pyautogui.press("\n")
+    press_key("\n")
     _sleep(t.get("enter_auction_interval", DEFAULT_TIMINGS["enter_auction_interval"]))
-    pyautogui.press("esc")
+    press_key("esc")
     _sleep(t.get("exit_auction_interval", DEFAULT_TIMINGS["exit_auction_interval"]))
     reset_search(t, stop_event=stop_event, log=log)
     return result
@@ -536,11 +554,11 @@ def reset_search(t, stop_event=None, log=None):
     _sleep = stop_event.wait if stop_event is not None else time.sleep
     # Esc backs out of the auction screen — the transition out takes longer
     # than the Enters that re-open the search, so it has its own interval.
-    pyautogui.press("esc")
+    press_key("esc")
     _sleep(t.get("exit_auction_interval", DEFAULT_TIMINGS["exit_auction_interval"]))
-    pyautogui.press("\n")
+    press_key("\n")
     _sleep(t.get("enter_auction_interval", DEFAULT_TIMINGS["enter_auction_interval"]))
-    pyautogui.press("\n")
+    press_key("\n")
     _sleep(t.get("load_cars_interval", DEFAULT_TIMINGS["load_cars_interval"]))
 
 
@@ -725,7 +743,7 @@ def sniper_loop(
                         if available > 0:
                             nav_delay = timings.get("nav_interval", DEFAULT_TIMINGS["nav_interval"])
                             for _ in range(available):
-                                pyautogui.press("down")
+                                press_key("down")
                                 stop_event.wait(nav_delay)
 
                         if status_callback:

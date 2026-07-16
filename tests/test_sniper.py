@@ -14,8 +14,9 @@ def noop(*args, **kwargs):
 @pytest.fixture(autouse=True)
 def disable_keystrokes(monkeypatch):
     """Prevent any test from sending real keystrokes via pyautogui."""
+    monkeypatch.setattr(sniper.pyautogui, "keyDown", noop)
+    monkeypatch.setattr(sniper.pyautogui, "keyUp", noop)
     monkeypatch.setattr(sniper.pyautogui, "press", noop)
-    monkeypatch.setattr(sniper.pyautogui, "typewrite", noop)
     return None
 
 
@@ -34,6 +35,22 @@ def isolate_config(tmp_path, monkeypatch):
     cfg.write_text("{}")
     monkeypatch.setattr(settings, "CONFIG_FILE", str(cfg))
     return cfg
+
+
+def test_press_key_holds_before_release(monkeypatch):
+    import time as _time
+
+    events = []
+    monkeypatch.setattr(
+        sniper.pyautogui, "keyDown", lambda k: events.append(("down", k, _time.perf_counter()))
+    )
+    monkeypatch.setattr(
+        sniper.pyautogui, "keyUp", lambda k: events.append(("up", k, _time.perf_counter()))
+    )
+    sniper.press_key("y")
+    assert [(e[0], e[1]) for e in events] == [("down", "y"), ("up", "y")]
+    held = events[1][2] - events[0][2]
+    assert held >= sniper.KEY_HOLD_MIN_S * 0.5  # generous lower bound for timer jitter
 
 
 def test_buy_sequence_aborts_when_unfocused(monkeypatch):
@@ -122,7 +139,7 @@ def test_reset_search(monkeypatch):
 
     monkeypatch.setattr(window_utils, "wait_for_fh6_focus", lambda stop_event=None: True)
     monkeypatch.setattr(window_utils, "is_fh6_focused", lambda: True)
-    monkeypatch.setattr(sniper.pyautogui, "press", fake_press)
+    monkeypatch.setattr(sniper, "press_key", fake_press)
     sniper.reset_search(settings.load_timings())
     assert calls == ["esc", "\n", "\n"], "reset_search should press esc, enter, enter in order"
 

@@ -66,7 +66,7 @@ def test_preset_faster_applies_values(settings_tab):
     assert abs(settings_tab.nav_interval_spin.value() - 0.25) < 0.01
     assert abs(settings_tab.confirm_buy_spin.value() - 0.25) < 0.01
     assert abs(settings_tab.post_buy_spin.value() - 4.0) < 0.01
-    assert abs(settings_tab.exit_auction_spin.value() - 0.7) < 0.01
+    assert abs(settings_tab.exit_auction_spin.value() - 0.65) < 0.01
     assert abs(settings_tab.enter_auction_spin.value() - 0.25) < 0.01
     assert abs(settings_tab.load_cars_spin.value() - 0.75) < 0.01
 

@@ -58,6 +58,21 @@ def test_stop_while_not_running_is_noop(sniper_tab):
     assert not sniper_tab._stop_event.is_set()
 
 
+def test_calib_refresh_signal_updates_calib_tab(sniper_tab, qtbot):
+    """Overlay calibration workers emit this signal so the Calibration tab's
+    SET / Not set labels refresh even when calibration ran from the overlay."""
+    calls = []
+
+    class FakeCalibTab:
+        def _refresh_status(self):
+            calls.append(True)
+
+    sniper_tab._calib_tab = FakeCalibTab()
+    sniper_tab._calib_refresh_signal.emit()
+    qtbot.wait(50)
+    assert calls == [True]
+
+
 def test_log_bridge_delivers_to_tab(sniper_tab, qtbot):
     app._emit_log("bridge test message")
     qtbot.wait(50)

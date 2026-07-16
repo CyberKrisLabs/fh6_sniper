@@ -51,7 +51,7 @@ Every keystroke is gated behind a focus check — if FH6 loses focus, the sniper
 
 | Preset | Car Available | Nav Interval | Confirm Buy | Post-buy Wait | Exit Auction | Enter Auction | Load Cars | Best For |
 |---|---|---|---|---|---|---|---|---|
-| Faster | 0.25 s | 0.25 s | 0.25 s | 4.0 s | 0.7 s | 0.25 s | 0.75 s | High-end PC, very fast connection |
+| Faster | 0.25 s | 0.25 s | 0.25 s | 4.0 s | 0.65 s | 0.25 s | 0.75 s | High-end PC, very fast connection |
 | Fast | 0.4 s | 0.3 s | 0.35 s | 4.0 s | 0.725 s | 0.3 s | 0.8 s | High-end PC, fast connection |
 | Mid | 0.6 s | 0.4 s | 0.45 s | 5.0 s | 0.9 s | 0.4 s | 0.9 s | Average PC, stable connection |
 | Slow | 0.8 s | 0.7 s | 0.75 s | 6.0 s | 1.2 s | 0.7 s | 1.2 s | Slower PC or laggy connection |
