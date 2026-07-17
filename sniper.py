@@ -175,6 +175,16 @@ def car_available(region, full_img=None):
             rx, ry, rw, rh = region
             screenshot = full_img.crop((rx, ry, rx + rw, ry + rh))
 
+        # Optional OCR mode (Settings tab): read the button TEXT instead of
+        # template matching. Slower per scan, but immune to the Moving
+        # Background OFF template issues and to controller/wheel prompt-glyph
+        # switches. Falls back to template matching when WinRT OCR is
+        # unavailable on this system.
+        if cfg.get("AUCTION_BUTTON_OCR", False) and vision_utils._winrt_available():
+            img = screenshot if screenshot is not None else vision_utils.grab_region(region)
+            text = vision_utils.ocr_text_pil(img).upper() if img is not None else ""
+            return "AUCTION" in text and "OPTIONS" in text
+
         # If we have a manually calibrated region, search it with the base
         # template. The first hit caches a scale hint inside vision_utils, so
         # subsequent scans only sweep a narrow window around it.
@@ -265,6 +275,15 @@ def car_available(region, full_img=None):
 # -------------------------
 
 
+# When the Auction Options button was detected but row 1 reads as empty, the
+# row card almost certainly just hasn't rendered yet — the button proves the
+# list screen is up, and cars fill rows top-down, so at least row 1 must hold
+# a car (sold or not). Rechecking on a fresh frame after a short wait is far
+# cheaper than the full reset cycle it would otherwise trigger.
+ROW_RENDER_RETRY_WAIT_S = 0.05
+ROW_RENDER_RETRIES = 3
+
+
 def find_available_row(
     row_regions: list,
     badge_params: dict | None,
@@ -272,6 +291,7 @@ def find_available_row(
     log=None,
     full_img=None,
     buy_last: bool = True,
+    stop_event=None,
 ) -> tuple[int, bool]:
     """Scan visible rows and return the 0-based index of the row to buy.
 
@@ -287,26 +307,23 @@ def find_available_row(
     (rows below it are never checked, fewer arrow-down presses) at the cost of
     competing against the bots that always target the top row.
 
+    If row 1 reads as empty (not rendered yet), the scan retries on a fresh
+    frame after ROW_RENDER_RETRY_WAIT_S, up to ROW_RENDER_RETRIES times,
+    before giving up — see the comment on those constants.
+
     Args:
         row_regions: list of (x, y, w, h) for each visible row.
         badge_params: dict from load_badge_params(), or None to skip sold detection.
         sold_template: absolute path to sold_badge_template.png.
         buy_last: target the last available row (True) or the first (False).
+        stop_event: optional threading.Event — retry waits abort instantly on stop.
 
     Returns:
         (available_idx, saw_any_car) — saw_any_car is False only when row 1
-        never rendered a car at all (still mid-load), which the caller uses to
-        avoid mislabeling that case as "all rows sold".
+        never rendered a car at all (even after retries), which the caller
+        uses to avoid mislabeling that case as "all rows sold".
     """
-    last_available = -1
-    saw_any_car = False
-
-    # Use the caller-supplied frame when available so car_available() and this
-    # function share one GPU grab. If not provided, capture one now.
-    if full_img is None:
-        full_img = vision_utils.grab_full_screen()
-
-    # Hoisted out of the per-row loop: the template existence check and the
+    # Hoisted out of the scan attempts: the template existence check and the
     # candidate list (which reads config.json) are identical for every row.
     # active_badge_params is None when badge detection can't run at all.
     active_badge_params = (
@@ -317,6 +334,45 @@ def find_available_row(
         if active_badge_params is not None and row_regions
         else None
     )
+
+    _wait = stop_event.wait if stop_event is not None else time.sleep
+    last_available, saw_any_car = -1, False
+    for attempt in range(1 + ROW_RENDER_RETRIES):
+        if attempt > 0:
+            if stop_event is not None and stop_event.is_set():
+                break
+            _wait(ROW_RENDER_RETRY_WAIT_S)
+            full_img = None  # force a fresh grab — the old frame was mid-render
+            if log:
+                log(f"  Row 1 not rendered — retrying ({attempt}/{ROW_RENDER_RETRIES})")
+
+        # Use the caller-supplied frame when available so car_available() and
+        # this function share one GPU grab. Retries grab a fresh frame.
+        if full_img is None:
+            full_img = vision_utils.grab_full_screen()
+
+        last_available, saw_any_car = _scan_rows_once(
+            row_regions,
+            active_badge_params,
+            sold_template,
+            sold_candidates,
+            log,
+            full_img,
+            buy_last,
+        )
+        if saw_any_car:
+            # Rows rendered — the result is real (available row or all sold).
+            break
+
+    return last_available, saw_any_car
+
+
+def _scan_rows_once(
+    row_regions, active_badge_params, sold_template, sold_candidates, log, full_img, buy_last
+) -> tuple[int, bool]:
+    """One scan pass over the rows of a single frame (see find_available_row)."""
+    last_available = -1
+    saw_any_car = False
 
     for idx, row_reg in enumerate(row_regions):
         rx, ry, rw, rh = row_reg
@@ -369,11 +425,23 @@ BUY_RESULT_CONF = 0.80
 _BUY_RESULT_HIGH_CONF = 0.90
 _BUY_RESULT_SCALE_MIN = 0.5
 _BUY_RESULT_SCALE_STEPS = 18
+# The success and fail dialogs share most of their pixels (box, chrome, text
+# style), so the wrong template can cross-match nearly as high as the right
+# one — observed live: success=0.803 vs fail=0.807 on an actual SUCCESS.
+# A verdict needs this much separation between the two scores; anything
+# closer is undetermined, and the caller retries on a fresher frame where
+# the settled dialog separates the scores properly.
+_BUY_RESULT_MIN_MARGIN = 0.05
 _buy_result_scale_hint: dict[str, float] = {}
 
 
 def _detect_buy_result(raw, full_region=None):
-    """Match buyout success/failure templates against a screenshot.
+    """Detect the buyout result screen: OCR first, template matching fallback.
+
+    The success and fail dialogs differ mainly by their TEXT — reading it
+    with Windows OCR can't cross-match the way the visually similar templates
+    can. Template matching remains as the fallback for systems without
+    WinRT OCR (and for frames where OCR reads nothing useful).
 
     Returns True (success), False (failure), or None (undetermined).
     Extracted so tests can monkeypatch it without touching OpenCV.
@@ -398,6 +466,21 @@ def _detect_buy_result(raw, full_region=None):
         cx, cy = rx + rw // 2, ry + rh // 2
         sw2, sh2 = rw * 2 // 3, rh * 2 // 3
         screen_pil = raw.crop((cx - sw2 // 2, cy - sh2 // 2, cx + sw2 // 2, cy + sh2 // 2))
+
+        # OCR pass: read the dialog text directly. The result dialog headers
+        # are "Buyout Successful" / "Buyout Failed" — the distinctive words
+        # are enough, and stay robust when OCR mangles the endings. Anything
+        # ambiguous falls through to template matching.
+        text = vision_utils.ocr_text(cv2.cvtColor(np.array(screen_pil), cv2.COLOR_RGB2BGR)).upper()
+        if text:
+            has_success = "SUCCESS" in text
+            has_failed = "FAIL" in text
+            if has_success and not has_failed:
+                print("Buy detection: OCR read 'successful'")
+                return True
+            if has_failed and not has_success:
+                print("Buy detection: OCR read 'failed'")
+                return False
 
         screen_gray = cv2.cvtColor(np.array(screen_pil), cv2.COLOR_RGB2GRAY)
         sh, sw = screen_gray.shape[:2]
@@ -445,10 +528,15 @@ def _detect_buy_result(raw, full_region=None):
 
         print(f"Buy detection: success={succ_score:.3f}  fail={fail_score:.3f}  threshold={conf}")
 
-        if succ_score >= conf and succ_score > fail_score:
+        if succ_score >= conf and succ_score - fail_score >= _BUY_RESULT_MIN_MARGIN:
             return True
-        if fail_score >= conf and fail_score > succ_score:
+        if fail_score >= conf and fail_score - succ_score >= _BUY_RESULT_MIN_MARGIN:
             return False
+        if max(succ_score, fail_score) >= conf:
+            print(
+                f"Buy detection ambiguous (Δ={abs(succ_score - fail_score):.3f} < "
+                f"{_BUY_RESULT_MIN_MARGIN}) — treating as undetermined, will retry"
+            )
     except Exception as e:
         print(f"Error detecting buy result: {e}")
     return None
@@ -718,6 +806,7 @@ def sniper_loop(
                             log=logger_callback,
                             full_img=shared_frame,
                             buy_last=buy_last,
+                            stop_event=stop_event,
                         )
                     else:
                         available = 0  # no row data — attempt buy on current row

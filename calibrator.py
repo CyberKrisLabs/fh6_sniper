@@ -538,13 +538,23 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
     SEARCH_X_FRACTION = 0.55
 
     best_info: dict | None = None
-    if vision_utils._winrt_available():
+    ocr_available = vision_utils._winrt_available()
+    if ocr_available:
         best_info = _find_badge_via_ocr(row_regions, full_img, SEARCH_X_FRACTION, _status)
         if best_info is None:
             _status("OCR found no SOLD badge — trying template matching…")
 
     if best_info is None:
         best_info = _find_badge_via_template(row_regions, full_img, SEARCH_X_FRACTION, _status)
+        # An OCR miss with OCR available is NOT worth warning about: OCR
+        # success varies per badge rendering (per car), and the live sniper
+        # retries OCR fresh on every row regardless of how calibration found
+        # the badge. Only OCR being absent entirely changes runtime behavior.
+        if best_info is not None and not ocr_available:
+            _status(
+                "⚠ Windows OCR unavailable — badge found by template "
+                "matching; live sold detection will rely on templates too."
+            )
 
     if best_info is None:
         _status(
@@ -577,24 +587,10 @@ def auto_calibrate_sold_badge(status_label=None) -> dict | None:
         result_dict, win.width, win.height, window_utils._get_display_dpr()
     )
 
-    try:
-        ax = best_info["rx"] + best_info["match_x"]
-        ay = best_info["ry"] + best_info["match_y"]
-        mw, mh = best_info["match_w"], best_info["match_h"]
-        badge_crop = full_img.crop((ax, ay, ax + mw, ay + mh))
-        captured_path = window_utils.get_user_data_file("sold_badge_captured_template.png")
-        badge_crop.save(captured_path)
-        try:
-            with open(CONFIG_FILE) as f:
-                _cfg = json.load(f)
-        except FileNotFoundError:
-            _cfg = {}
-        _cfg["CAPTURED_SOLD_BADGE_TEMPLATE"] = captured_path
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(_cfg, f, indent=2)
-        _status("📸 Sold badge snapshot saved.")
-    except Exception as _e:
-        _status(f"⚠️ Could not capture badge template: {_e}")
+    # No screen capture of the badge is saved: the bundled templates are
+    # cleaned (no car behind the badge), while a live capture inevitably
+    # bakes the calibration car's paintwork into the tilted badge's bounding
+    # box — pure noise against any other car at runtime.
 
     row_num = best_info["row_idx"] + 1
     _status(f"✅ Sold badge detected in row {row_num} and saved.")

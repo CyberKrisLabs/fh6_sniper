@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import webbrowser
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -24,10 +25,22 @@ except Exception:
 __version__ = "1.3.2"
 
 
+RELEASES_URL = "https://github.com/CyberKrisLabs/fh6_sniper/releases"
+
+
 class InfoTab(QWidget):
+    # Emitted from the update-check worker thread; the label must only be
+    # touched on the GUI thread.
+    _update_result = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._build_ui()
+        self._update_result.connect(self._on_update_result)
+
+    def _on_update_result(self, html: str) -> None:
+        self.update_label.setText(html)
+        self.update_btn.setEnabled(True)
 
     def _build_ui(self):
         scroll = QScrollArea(self)
@@ -75,6 +88,7 @@ class InfoTab(QWidget):
         root.addLayout(upd_row)
 
         self.update_label = QLabel("")
+        self.update_label.setOpenExternalLinks(True)
         root.addWidget(self.update_label)
 
         root.addStretch()
@@ -90,8 +104,7 @@ class InfoTab(QWidget):
 
         def _work():
             if not HAVE_REQUESTS:
-                self.update_label.setText("⚠️ 'requests' not installed — cannot check for updates")
-                self.update_btn.setEnabled(True)
+                self._update_result.emit("⚠️ 'requests' not installed — cannot check for updates")
                 return
             try:
                 resp = requests.get(
@@ -99,7 +112,9 @@ class InfoTab(QWidget):
                     timeout=4,
                 )
                 if resp.ok:
-                    tag = resp.json().get("tag_name", "")
+                    data = resp.json()
+                    tag = data.get("tag_name", "")
+                    release_url = data.get("html_url") or RELEASES_URL
                     latest = tag.lstrip("vV")
                     try:
                         newer = tuple(int(x) for x in latest.split(".")) > tuple(
@@ -108,13 +123,15 @@ class InfoTab(QWidget):
                     except Exception:
                         newer = latest != __version__
                     if newer:
-                        self.update_label.setText(f"🔄 Update available: {tag}")
+                        self._update_result.emit(
+                            f'🔄 Update available: <a href="{release_url}">{tag} — '
+                            "download from the releases page</a>"
+                        )
                     else:
-                        self.update_label.setText("✅ You are up to date")
+                        self._update_result.emit("✅ You are up to date")
                 else:
-                    self.update_label.setText("⚠️ Update check failed")
+                    self._update_result.emit("⚠️ Update check failed")
             except Exception:
-                self.update_label.setText("⚠️ Update check failed (network error)")
-            self.update_btn.setEnabled(True)
+                self._update_result.emit("⚠️ Update check failed (network error)")
 
         threading.Thread(target=_work, daemon=True).start()

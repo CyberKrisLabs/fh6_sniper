@@ -93,6 +93,22 @@ def _patch_rows(monkeypatch, sold_scores):
     )
 
 
+def test_car_available_ocr_mode(monkeypatch, isolate_config):
+    """With AUCTION_BUTTON_OCR on, detection is decided by the button text."""
+    import json
+
+    isolate_config.write_text(json.dumps({"AUCTION_BUTTON_OCR": True}))
+    monkeypatch.setattr(sniper, "CONFIG_FILE", str(isolate_config))
+    monkeypatch.setattr(sniper, "_config_cache", {"mtime": None, "data": None})
+    monkeypatch.setattr(vision_utils, "_winrt_available", lambda: True)
+
+    monkeypatch.setattr(vision_utils, "ocr_text_pil", lambda img: "Auction Options")
+    assert sniper.car_available(region=(0, 0, 100, 50), full_img=_FakeScreen()) is True
+
+    monkeypatch.setattr(vision_utils, "ocr_text_pil", lambda img: "some other screen")
+    assert sniper.car_available(region=(0, 0, 100, 50), full_img=_FakeScreen()) is False
+
+
 def test_find_available_row_buy_last_targets_last(monkeypatch):
     _patch_rows(monkeypatch, [0.0, 0.0, 0.0])  # three available rows
     rows = [(0, 0, 100, 50), (0, 50, 100, 50), (0, 100, 100, 50)]
@@ -129,6 +145,37 @@ def test_find_available_row_buy_first_stops_early(monkeypatch):
     assert idx == 1  # first available (row 2, 0-based 1)
     assert saw_car
     assert len(calls) == 2  # row 3 was never checked
+
+
+def test_find_available_row_retries_unrendered_row(monkeypatch):
+    """Row 1 empty on the first frame (mid-render) → rescan on a fresh frame
+    instead of giving up, since the caller already saw the auction button."""
+    calls = {"n": 0}
+
+    def flaky_row_has_car(region, row_img=None):
+        calls["n"] += 1
+        return calls["n"] > 1  # first check reads empty; rendered on the retry
+
+    monkeypatch.setattr(vision_utils, "row_has_car", flaky_row_has_car)
+    monkeypatch.setattr(vision_utils, "build_sold_candidates", lambda tpl, w: [tpl])
+    monkeypatch.setattr(
+        vision_utils,
+        "sold_badge_score",
+        lambda region, params, tpl, row_img=None, candidates=None: 0.0,
+    )
+    monkeypatch.setattr(vision_utils, "grab_full_screen", lambda: _FakeScreen())
+    monkeypatch.setattr(sniper.time, "sleep", lambda s: None)
+
+    idx, saw_car = sniper.find_available_row(
+        [(0, 0, 100, 50)],
+        {"badge_x_pct": 0},
+        window_utils.resource_path("assets/sold_badge_template.png"),
+        full_img=_FakeScreen(),
+        buy_last=True,
+    )
+    assert idx == 0
+    assert saw_car
+    assert calls["n"] == 2  # exactly one retry was needed
 
 
 def test_reset_search(monkeypatch):

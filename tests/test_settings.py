@@ -361,6 +361,16 @@ def test_buy_last_available_round_trip():
     assert saved["BUY_LAST_AVAILABLE"] is False
 
 
+def test_auction_button_ocr_round_trip():
+    """AUCTION_BUTTON_OCR defaults to False and persists when toggled."""
+    assert settings.get_auction_button_ocr() is False
+    settings.set_auction_button_ocr(True)
+    assert settings.get_auction_button_ocr() is True
+    with open(settings.CONFIG_FILE) as f:
+        saved = json.load(f)
+    assert saved["AUCTION_BUTTON_OCR"] is True
+
+
 def test_show_ingame_overlay_round_trip():
     """SHOW_INGAME_OVERLAY defaults to False and persists when toggled."""
     assert settings.get_show_ingame_overlay() is False

@@ -324,7 +324,13 @@ class GuidesTab(QWidget):
             "• Disconnect controllers and wheels — FH6 switches its button prompts to "
             "gamepad glyphs the moment a controller sends any input (a nudged stick, "
             "wheel drift, a bumped pedal). The sniper's templates match the keyboard-style "
-            '"(Y) Auction Options" button, so a glyph switch mid-session breaks detection'
+            '"(Y) Auction Options" button, so a glyph switch mid-session breaks detection '
+            "(or turn on Auction Options OCR in Settings, which reads the button text "
+            "and is immune to the glyph switch)\n"
+            "• Any resolution, window size, and Windows display scaling works — the "
+            "sniper adapts to your setup through Calibration and the Row Tuner instead "
+            "of demanding a fixed 1080p fullscreen layout. The trade-off: calibrate "
+            "once for your setup, and recalibrate when it changes"
         )
 
         _section("Quick Start")
@@ -341,6 +347,13 @@ class GuidesTab(QWidget):
         )
 
         _section("Calibration")
+        _para(
+            "Calibration is what lets the sniper run at any resolution, window size, "
+            "and display scaling — it learns where things are on YOUR screen instead "
+            "of assuming a fixed layout. In exchange, run it once for your setup and "
+            "again whenever the setup changes (resolution, window size/position, "
+            "windowed vs fullscreen)."
+        )
 
         _subhead("Row Calibration")
         _para(

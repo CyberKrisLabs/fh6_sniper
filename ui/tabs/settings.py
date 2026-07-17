@@ -29,13 +29,14 @@ if TYPE_CHECKING:
 PRESETS = {
     "Faster": {
         # All values measured live as stable — the Enter presses register far
-        # faster than the Escape screen transition, hence exit >> enter.
-        "car_available_interval": 0.25,
-        "nav_interval": 0.25,
-        "confirm_buy_interval": 0.25,
+        # faster than the Escape screen transition, hence exit >> enter. Nav
+        # can go very low because press_key holds each press a full frame.
+        "car_available_interval": 0.24,
+        "nav_interval": 0.05,
+        "confirm_buy_interval": 0.18,
         "post_buy_wait": 4.0,
         "exit_auction_interval": 0.65,
-        "enter_auction_interval": 0.25,
+        "enter_auction_interval": 0.255,
         "load_cars_interval": 0.75,
     },
     "Fast": {
@@ -174,7 +175,7 @@ class SettingsTab(QWidget):
             "Menu confirmations register faster than the Escape transition, so "
             "this can be tuned much lower than Exit Auction Interval — live "
             "testing found 0.25s stable, and a really fast PC may go lower "
-            "(minimum 0.1s).\n\n"
+            "(minimum 0.05s).\n\n"
             "See Load Cars Interval for the wait after the final Enter, while "
             "the list actually loads.\n\n"
             "If the second Enter stops registering, you've gone too low."
@@ -263,6 +264,29 @@ class SettingsTab(QWidget):
         dlg.setIcon(QMessageBox.Icon.Information)
         dlg.exec()
 
+    def _show_button_ocr_info(self):
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Auction Options OCR")
+        dlg.setText("<b>Auction Options OCR</b>")
+        dlg.setInformativeText(
+            "Detects the Auction Options button by READING its text with "
+            "Windows OCR instead of matching a template image.\n\n"
+            "When this helps: a controller or wheel is connected. Any input "
+            "from it switches the button's key glyph from the keyboard (Y) to "
+            "a gamepad icon, which breaks the template. The text doesn't "
+            "change, so OCR keeps working.\n\n"
+            "While this is ON, changing FH6's Moving Backgrounds setting needs "
+            "no recalibration — calibration is only used for WHERE to look, "
+            "and the button's position doesn't change.\n\n"
+            "Tradeoff: OCR adds roughly 50–150 ms per scan, so leave this OFF "
+            "if template detection is working for you — pure image matching "
+            "is faster.\n\n"
+            "Requires Windows OCR (falls back to template matching "
+            "automatically if it isn't available)."
+        )
+        dlg.setIcon(QMessageBox.Icon.Information)
+        dlg.exec()
+
     def _show_overlay_info(self):
         dlg = QMessageBox(self)
         dlg.setWindowTitle("Show In-game Overlay")
@@ -291,6 +315,10 @@ class SettingsTab(QWidget):
             "different template to detect it.\n\n"
             "This affects both the live sniper and Auto Calibration — re-run Auto "
             "Calibration after changing this.\n\n"
+            "Exception: with Auction Options OCR ON, no recalibration is needed "
+            "after changing this — OCR reads the button's text and doesn't care "
+            "about the background. (Ticking this box correctly still helps if "
+            "you ever turn OCR back off.)\n\n"
             "The switch from black to white background can make detection less "
             "reliable if Load Cars Interval is set too low — the sniper may scan "
             "before the background has finished changing. If you enable this, try "
@@ -339,7 +367,7 @@ class SettingsTab(QWidget):
         self.car_available_spin = self._make_float_row(
             timing_layout,
             "Car Available (s)",
-            0.1,
+            0.05,
             20.0,
             "Delay after pressing Y, waiting for the buy dialog to render.",
             self._show_car_available_info,
@@ -347,7 +375,7 @@ class SettingsTab(QWidget):
         self.nav_interval_spin = self._make_float_row(
             timing_layout,
             "Nav Interval (s)",
-            0.1,
+            0.05,
             20.0,
             "Delay between up/down key presses (row navigation, buy dialog down-arrow).",
             self._show_nav_interval_info,
@@ -355,7 +383,7 @@ class SettingsTab(QWidget):
         self.confirm_buy_spin = self._make_float_row(
             timing_layout,
             "Confirm Buy (s)",
-            0.1,
+            0.05,
             20.0,
             "Delay between the two Enter presses that confirm the purchase.",
             self._show_confirm_buy_info,
@@ -363,7 +391,7 @@ class SettingsTab(QWidget):
         self.post_buy_spin = self._make_float_row(
             timing_layout,
             "Post Buy Wait (s)",
-            0.1,
+            0.05,
             20.0,
             "Wait time after a buy attempt for the game to respond.",
             self._show_post_buy_info,
@@ -379,7 +407,7 @@ class SettingsTab(QWidget):
         self.enter_auction_spin = self._make_float_row(
             timing_layout,
             "Enter Auction (s)",
-            0.1,
+            0.05,
             20.0,
             "Delay after the first Enter that re-opens the auction search.",
             self._show_enter_auction_info,
@@ -387,7 +415,7 @@ class SettingsTab(QWidget):
         self.load_cars_spin = self._make_float_row(
             timing_layout,
             "Load Cars (s)",
-            0.1,
+            0.05,
             20.0,
             "Delay after the final Enter of the reset sequence, while the auction list reloads.",
             self._show_load_cars_info,
@@ -395,7 +423,7 @@ class SettingsTab(QWidget):
         self.buy_result_retry_spin = self._make_float_row(
             timing_layout,
             "Buy Result Retry (s)",
-            0.1,
+            0.05,
             20.0,
             "Wait between re-checks when the buy success/fail screen hasn't appeared yet.",
             self._show_buy_result_retry_info,
@@ -505,6 +533,22 @@ class SettingsTab(QWidget):
         bg_row.addStretch()
         bg_layout.addLayout(bg_row)
         self.moving_bg_off_cb.toggled.connect(self._on_moving_bg_toggled)
+        ocr_row = QHBoxLayout()
+        self.button_ocr_cb = QCheckBox("Auction Options OCR")
+        ocr_info_btn = QPushButton("ⓘ")
+        ocr_info_btn.setFixedSize(22, 22)
+        ocr_info_btn.setFlat(True)
+        ocr_info_btn.setStyleSheet(
+            "QPushButton { font-size: 13pt; color: #2196f3; border: none; padding: 0; }"
+            "QPushButton:hover { color: #64b5f6; }"
+        )
+        ocr_info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        ocr_info_btn.clicked.connect(self._show_button_ocr_info)
+        ocr_row.addWidget(self.button_ocr_cb)
+        ocr_row.addWidget(ocr_info_btn)
+        ocr_row.addStretch()
+        bg_layout.addLayout(ocr_row)
+        self.button_ocr_cb.toggled.connect(self._on_button_ocr_toggled)
         right_col.addWidget(bg_box)
 
         ui_box = QGroupBox("Interface")
@@ -590,6 +634,7 @@ class SettingsTab(QWidget):
             ):
                 spin.setValue(timings.get(key, defaults[key]))
             self.moving_bg_off_cb.setChecked(settings.get_moving_background_off())
+            self.button_ocr_cb.setChecked(settings.get_auction_button_ocr())
             self.buy_last_cb.setChecked(settings.get_buy_last_available())
             self.overlay_cb.setChecked(settings.get_show_ingame_overlay())
         finally:
@@ -617,6 +662,14 @@ class SettingsTab(QWidget):
             return
         settings.set_show_ingame_overlay(checked)
         self._sniper_tab.set_overlay_enabled(checked)
+        self.feedback_label.setText("Settings saved")
+        self.feedback_label.setStyleSheet("color: #4caf50;")
+        QTimer.singleShot(2000, lambda: self.feedback_label.setText(""))
+
+    def _on_button_ocr_toggled(self, checked: bool) -> None:
+        if self._applying_preset:
+            return
+        settings.set_auction_button_ocr(checked)
         self.feedback_label.setText("Settings saved")
         self.feedback_label.setStyleSheet("color: #4caf50;")
         QTimer.singleShot(2000, lambda: self.feedback_label.setText(""))

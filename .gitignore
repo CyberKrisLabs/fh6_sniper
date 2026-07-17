@@ -21,8 +21,6 @@ installer/Output/
 config.json
 sniper.log
 
-# User-captured calibration data
-docs/sold_badge_captured_template.png
 docs/sold_badge_region.json
 docs/row_regions_tuned.json
 

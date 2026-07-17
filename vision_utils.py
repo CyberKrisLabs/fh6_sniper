@@ -11,7 +11,6 @@ OpenCV internals for performance and scale awareness.
 
 from __future__ import annotations
 
-import json
 import os
 import time
 
@@ -21,8 +20,6 @@ import pyautogui
 from PIL import Image
 
 import window_utils
-
-CONFIG_FILE = window_utils.get_config_file()
 
 # Sold-badge match threshold — the single authoritative value. sniper.py
 # re-exports it; calibrator and the tuning tools import it from here so it
@@ -624,6 +621,68 @@ async def _winrt_ocr_async(img_bgr: np.ndarray) -> str:
     return await _recognize(cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGRA))
 
 
+async def _winrt_text_async(img_bgr: np.ndarray) -> str:
+    """OCR an arbitrary BGR image.
+
+    Small crops (e.g. the calibrated auction-button region) are upscaled 3×
+    before recognition — Windows OCR reads small text unreliably at native
+    size, the same reason the sold-badge path upscales. A second pass with an
+    Otsu threshold catches renderings the colour pass misses (e.g. low
+    contrast against the Moving-Backgrounds-OFF white background).
+    """
+    from winrt.windows.graphics.imaging import BitmapPixelFormat, SoftwareBitmap
+    from winrt.windows.storage.streams import DataWriter
+
+    engine = _get_ocr_engine()
+    if engine is None:
+        return ""
+
+    h, w = img_bgr.shape[:2]
+    if h < 120:
+        img_bgr = cv2.resize(img_bgr, (w * 3, h * 3), interpolation=cv2.INTER_CUBIC)
+        h, w = img_bgr.shape[:2]
+
+    async def _recognize(bgra: np.ndarray) -> str:
+        writer = DataWriter()
+        writer.write_bytes(bgra.tobytes())
+        ibuf = writer.detach_buffer()
+        bitmap = SoftwareBitmap.create_copy_from_buffer(ibuf, BitmapPixelFormat.BGRA8, w, h)
+        result = await engine.recognize_async(bitmap)
+        return result.text
+
+    text = await _recognize(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2BGRA))
+    if text.strip():
+        return text
+
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return await _recognize(cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGRA))
+
+
+def ocr_text(img_bgr: np.ndarray) -> str:
+    """Read all text from a BGR image using Windows OCR.
+
+    Returns "" when WinRT OCR is unavailable or recognition fails — callers
+    must treat an empty string as "no answer", not "no text".
+    """
+    if not _winrt_available():
+        return ""
+    try:
+        import asyncio
+
+        return asyncio.run(_winrt_text_async(img_bgr))
+    except Exception:
+        return ""
+
+
+def ocr_text_pil(pil_img) -> str:
+    """OCR a PIL RGB image (convenience wrapper around ocr_text)."""
+    try:
+        return ocr_text(cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR))
+    except Exception:
+        return ""
+
+
 def _sold_badge_ocr(img_bgr: np.ndarray) -> bool:
     """Return True if Windows built-in OCR finds 'SOLD' in the badge region."""
     import asyncio
@@ -639,9 +698,12 @@ def _sold_badge_ocr(img_bgr: np.ndarray) -> bool:
 def build_sold_candidates(template_path: str, row_w: int) -> list[str]:
     """Build the ordered sold-badge template candidate list for a row width.
 
-    Reads config.json for the pixel-captured calibration template, so hot-loop
-    callers should call this once per scan cycle (not per row) and pass the
-    result to sold_badge_score(candidates=...).
+    Only the cleaned bundled templates are used — they have no car behind the
+    badge, so their flat background is effectively self-masking under
+    TM_CCOEFF_NORMED. (A live screen capture of the badge was tried and
+    removed: the tilted badge's bounding box bakes the calibration car's
+    paintwork in as noise.) Hot-loop callers should call this once per scan
+    cycle (not per row) and pass the result to sold_badge_score(candidates=...).
     """
     screen_w = pyautogui.size()[0]
     rw_pct = row_w / screen_w if screen_w else 1.0
@@ -651,20 +713,6 @@ def build_sold_candidates(template_path: str, row_w: int) -> list[str]:
         primary = template_path
 
     candidates: list[str] = []
-    # Try the pixel-captured template from badge calibration first (may score
-    # slightly higher than the generic pre-made templates for this display).
-    try:
-        with open(CONFIG_FILE) as _f:
-            _cfg = json.load(_f)
-        _captured = _cfg.get("CAPTURED_SOLD_BADGE_TEMPLATE")
-        if _captured and not os.path.isfile(_captured):
-            # Path from the other run mode (dev docs/ vs exe APPDATA) — try
-            # this mode's user-data location for the same filename.
-            _captured = window_utils.get_user_data_file(os.path.basename(_captured))
-        if _captured and os.path.isfile(_captured):
-            candidates.append(_captured)
-    except Exception:
-        pass
     for p in [
         primary,
         template_path.replace(".png", "_med.png"),
@@ -696,8 +744,7 @@ def sold_badge_score(
                  grab_region call returns a different (stale) frame.
         candidates: optional pre-built template candidate list (see
                  build_sold_candidates). Callers in a hot loop should build
-                 this once and pass it in — building it here costs a
-                 config.json disk read per call.
+                 this once and pass it in rather than rebuilding per row.
     """
     bx, by, bw, bh = badge_scan_region(row_region, badge_params)
 

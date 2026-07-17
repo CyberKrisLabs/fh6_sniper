@@ -14,7 +14,9 @@ import window_utils
 CONFIG_FILE = window_utils.get_config_file()
 
 # Validation limits
-MIN_INTERVAL = 0.1  # minimum delay between keystrokes
+# The hold inside press_key (~20-40ms) already guarantees each press spans a
+# game frame, so the inter-key wait can go very low; 0.05 is a sanity floor.
+MIN_INTERVAL = 0.05  # minimum delay between keystrokes
 MAX_INTERVAL = 20.0  # maximum interval to prevent unbearably slow execution
 MIN_SCANS = 0  # 0 means infinite
 MAX_SCANS = 1000000
@@ -72,6 +74,11 @@ DEFAULT_CONFIG: dict[str, object] = {
     "BUY_LAST_AVAILABLE": True,
     # whether the in-game HUD overlay is shown over the FH6 window
     "SHOW_INGAME_OVERLAY": False,
+    # detect the Auction Options button by reading its text with Windows OCR
+    # instead of template matching — slower per scan, but immune to the
+    # Moving Background OFF template issues and to controller/wheel prompt
+    # glyph switches
+    "AUCTION_BUTTON_OCR": False,
     # AUCTION_OPTIONS_REGION is optional (only set via manual calibration)
 }
 
@@ -291,6 +298,19 @@ def set_show_ingame_overlay(value: bool):
     """Persist whether the in-game overlay is shown over the FH6 window."""
     config = load_config()
     config["SHOW_INGAME_OVERLAY"] = bool(value)
+    save_config(config)
+
+
+def get_auction_button_ocr():
+    """Return True if Auction Options detection should use OCR (default off)."""
+    config = load_config()
+    return config.get("AUCTION_BUTTON_OCR", False)
+
+
+def set_auction_button_ocr(value: bool):
+    """Persist whether Auction Options detection uses OCR instead of templates."""
+    config = load_config()
+    config["AUCTION_BUTTON_OCR"] = bool(value)
     save_config(config)
 
 

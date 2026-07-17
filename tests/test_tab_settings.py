@@ -45,8 +45,8 @@ def test_exit_auction_spin_floored_at_half_second(settings_tab):
     assert settings_tab.exit_auction_spin.minimum() == 0.5
     settings_tab.exit_auction_spin.setValue(0.1)
     assert settings_tab.exit_auction_spin.value() == 0.5
-    # Enter Auction's floor is temporarily lifted to 0.1 for real-world testing
-    assert settings_tab.enter_auction_spin.minimum() == 0.1
+    # Enter Auction has no extra floor — just the global MIN_INTERVAL
+    assert settings_tab.enter_auction_spin.minimum() == settings.MIN_INTERVAL
 
 
 def test_preset_fast_applies_values(settings_tab):
@@ -62,12 +62,12 @@ def test_preset_fast_applies_values(settings_tab):
 
 def test_preset_faster_applies_values(settings_tab):
     settings_tab.preset_combo.setCurrentText("Faster")
-    assert abs(settings_tab.car_available_spin.value() - 0.25) < 0.01
-    assert abs(settings_tab.nav_interval_spin.value() - 0.25) < 0.01
-    assert abs(settings_tab.confirm_buy_spin.value() - 0.25) < 0.01
+    assert abs(settings_tab.car_available_spin.value() - 0.24) < 0.01
+    assert abs(settings_tab.nav_interval_spin.value() - 0.05) < 0.01
+    assert abs(settings_tab.confirm_buy_spin.value() - 0.18) < 0.01
     assert abs(settings_tab.post_buy_spin.value() - 4.0) < 0.01
     assert abs(settings_tab.exit_auction_spin.value() - 0.65) < 0.01
-    assert abs(settings_tab.enter_auction_spin.value() - 0.25) < 0.01
+    assert abs(settings_tab.enter_auction_spin.value() - 0.255) < 0.01
     assert abs(settings_tab.load_cars_spin.value() - 0.75) < 0.01
 
 
@@ -84,6 +84,12 @@ def test_preset_slow_applies_values(settings_tab):
 
 def test_buy_last_checkbox_defaults_on(settings_tab):
     assert settings_tab.buy_last_cb.isChecked()
+
+
+def test_button_ocr_checkbox_defaults_off_and_toggles(settings_tab):
+    assert not settings_tab.button_ocr_cb.isChecked()
+    settings_tab.button_ocr_cb.setChecked(True)
+    assert settings.get_auction_button_ocr() is True
 
 
 def test_overlay_checkbox_defaults_off_and_toggles(settings_tab):

@@ -112,10 +112,12 @@ scrolling past row 4.
 
 ### Template
 
-`assets/sold_badge_template.png` (+ `_med`, `_1024x768` variants) — real game screenshots of
-the yellow "SOLD!" badge. Committed to the repo; no in-app capture needed. (Auto-calibration
-may additionally save a pixel-captured template, referenced by the config key
-`CAPTURED_SOLD_BADGE_TEMPLATE`, which is tried first.)
+`assets/sold_badge_template.png` (+ `_med`, `_1024x768` variants) — cleaned captures of
+the yellow "SOLD!" badge with the car background removed. Committed to the repo; no
+in-app capture needed. (A pixel-captured per-user template was tried and removed: the
+tilted badge's bounding box inevitably bakes the calibration car's paintwork in as noise,
+while the cleaned templates' flat background is effectively self-masking under
+TM_CCOEFF_NORMED.)
 
 To regenerate variants if the template is replaced:
 ```python

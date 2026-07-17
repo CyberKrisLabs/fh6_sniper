@@ -26,7 +26,15 @@ python app.py
 
 ## How It Works
 
-The sniper takes rapid screenshots of the auction house region and uses OpenCV template matching to detect when the "Auction Options" button appears. When found, it fires the buy sequence automatically. If the car is gone before it can buy, it refreshes the listing and keeps scanning.
+The sniper takes rapid screenshots of the auction house region and uses OpenCV template matching to detect when the "Auction Options" button appears (or reads the button text with Windows OCR, if the Auction Options OCR setting is on). When found, it fires the buy sequence automatically. If the car is gone before it can buy, it refreshes the listing and keeps scanning.
+
+**Sold-badge detection** runs in three stages per row, cheapest first:
+
+1. **Yellow gate** — a fast color check on the badge area. No yellow pixels at all → definitely not sold, done. This filters most rows without any heavier work.
+2. **OCR** — Windows OCR reads the badge text. If it reads "SOLD", the row is sold; if it reads the area and finds no SOLD, the row is available. This is the decisive check on most systems — text can't be faked by a yellow car.
+3. **Template matching** — fallback only when Windows OCR isn't available or errors. Compares the badge area against cleaned badge images (car background removed) at the size variant matching your window.
+
+Buy success/failure detection works the same way: OCR reads the "Buyout Successful" / "Buyout Failed" dialog text first, with template matching as the fallback.
 
 Every keystroke is gated behind a focus check — if FH6 loses focus, the sniper pauses immediately.
 
@@ -36,6 +44,7 @@ Every keystroke is gated behind a focus check — if FH6 loses focus, the sniper
 
 | Feature | Description |
 |---|---|
+| Any Resolution & Scaling | Runs at whatever resolution, window size, and Windows display scaling you already use — no forced 1080p fullscreen |
 | Auto & Manual Calibration | Pinpoints the exact screen region to watch for maximum speed |
 | Multi-scale Detection | Finds buttons at any window size using 24-step scale search |
 | Timing Presets | Faster / Fast / Mid / Slow presets tuned for different PC and connection speeds |
@@ -51,7 +60,7 @@ Every keystroke is gated behind a focus check — if FH6 loses focus, the sniper
 
 | Preset | Car Available | Nav Interval | Confirm Buy | Post-buy Wait | Exit Auction | Enter Auction | Load Cars | Best For |
 |---|---|---|---|---|---|---|---|---|
-| Faster | 0.25 s | 0.25 s | 0.25 s | 4.0 s | 0.65 s | 0.25 s | 0.75 s | High-end PC, very fast connection |
+| Faster | 0.24 s | 0.05 s | 0.18 s | 4.0 s | 0.65 s | 0.255 s | 0.75 s | High-end PC, very fast connection |
 | Fast | 0.4 s | 0.3 s | 0.35 s | 4.0 s | 0.725 s | 0.3 s | 0.8 s | High-end PC, fast connection |
 | Mid | 0.6 s | 0.4 s | 0.45 s | 5.0 s | 0.9 s | 0.4 s | 0.9 s | Average PC, stable connection |
 | Slow | 0.8 s | 0.7 s | 0.75 s | 6.0 s | 1.2 s | 0.7 s | 1.2 s | Slower PC or laggy connection |
@@ -70,6 +79,8 @@ Every keystroke is gated behind a focus check — if FH6 loses focus, the sniper
 ## Calibration
 
 Calibration tells the sniper exactly where on your screen to look, which makes detection faster and more reliable.
+
+It's also what lets the sniper run at **any resolution, window size, and Windows display scaling** — instead of demanding one fixed setup (like 1080p fullscreen at 100% scaling), it adapts to whatever you already play at. The trade-off: you run Calibration and the Row Tuner once for your setup, and re-run them whenever that setup changes.
 
 - **Auto Calibration** — takes a screenshot and finds the auction button automatically. Works in windowed and fullscreen mode. Try this first.
 - **Manual Calibration** — hover your mouse over the top-left corner of the button and confirm, then do the same for the bottom-right corner. Use this if auto fails or if you have an unusual window layout.
