@@ -22,7 +22,7 @@ except Exception:
     requests = None  # type: ignore[assignment]
     HAVE_REQUESTS = False
 
-__version__ = "1.3.2"
+__version__ = "1.3.3"
 
 
 RELEASES_URL = "https://github.com/CyberKrisLabs/fh6_sniper/releases"

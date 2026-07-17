@@ -1,5 +1,5 @@
 #define MyAppName "FH6 Sniper"
-#define MyAppVersion "1.3.2"
+#define MyAppVersion "1.3.3"
 #define MyAppExeName "FH6 Sniper.exe"
 
 [Setup]
